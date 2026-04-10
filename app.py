@@ -4,11 +4,10 @@ DeepResearch Agent — v4
 运行方式：streamlit run app.py
 """
 
-import os, sys
+import os
 import streamlit as st
 from urllib.parse import urlparse
 
-sys.path.insert(0, os.path.dirname(__file__))
 from dotenv import load_dotenv
 load_dotenv()
 
