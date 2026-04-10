@@ -92,7 +92,7 @@ def ai_generate(prompt: str, system: str = "") -> str:
     raise RuntimeError(f"所有 AI 提供商均不可用。最后错误：{last_err}")
 
 # ──────────────────────────────────────────────
-# 2. 系统提示词
+# 2. 系统提示词 & 场景模板
 # ──────────────────────────────────────────────
 SYSTEM_PROMPT = """你是一个深度研究助手。
 我会给你提供从多个角度搜索并抓取的网页资料，你需要：
@@ -104,6 +104,266 @@ SYSTEM_PROMPT = """你是一个深度研究助手。
 
 请用中文回答，保持专业但易于理解的风格。
 如果搜索结果与问题无关，请直接说明并凭自身知识回答。"""
+
+# 场景化报告模板
+TEMPLATES = {
+    "general": {
+        "label": "📋 通用研究报告",
+        "desc": "适合所有主题，结构灵活",
+        "system": SYSTEM_PROMPT,
+        "structure": "",
+    },
+    "industry": {
+        "label": "📊 行业研究报告",
+        "desc": "行业规模、竞争格局、发展趋势",
+        "system": """你是一位专业的行业研究分析师。请基于提供的资料，生成一份标准行业研究报告，严格按照以下结构：
+
+## 一、行业概述
+（规模、定义、主要细分领域）
+
+## 二、市场现状与规模
+（市场规模数据、增长率、关键指标）
+
+## 三、竞争格局
+（主要玩家、市场份额、竞争态势）
+
+## 四、发展趋势与驱动因素
+（技术/政策/需求驱动的趋势）
+
+## 五、风险与挑战
+（潜在风险点）
+
+## 六、综合结论
+（核心判断与建议）
+
+要求：数据翔实、引用来源、客观专业。""",
+        "structure": "## 一、行业概述\n## 二、市场现状与规模\n## 三、竞争格局\n## 四、发展趋势\n## 五、风险挑战\n## 六、综合结论",
+    },
+    "investment": {
+        "label": "💰 投资备忘录",
+        "desc": "市场机会、竞争壁垒、风险评估",
+        "system": """你是一位资深投资分析师。请基于资料生成一份投资备忘录（Investment Memo），结构如下：
+
+## Executive Summary（执行摘要）
+（核心投资逻辑，3-5句话）
+
+## 市场机会
+（TAM/SAM/SOM 估算，增长驱动）
+
+## 竞争分析
+（主要竞争对手、差异化优势、护城河）
+
+## 商业模式
+（收入结构、盈利路径、单位经济模型）
+
+## 风险因素
+（市场/技术/政策/竞争风险，各附应对策略）
+
+## 投资结论
+（建议评级：强烈关注/观察/回避，理由）
+
+要求：数据驱动，逻辑严密，每个判断有依据。""",
+        "structure": "## Executive Summary\n## 市场机会\n## 竞争分析\n## 商业模式\n## 风险因素\n## 投资结论",
+    },
+    "academic": {
+        "label": "🎓 学术文献综述",
+        "desc": "研究背景、文献梳理、研究空白",
+        "system": """你是一位学术研究助手。请基于资料生成一份规范的学术文献综述，结构如下：
+
+## 1. 研究背景与意义
+（研究问题的背景、重要性）
+
+## 2. 核心概念界定
+（关键术语的学术定义）
+
+## 3. 研究现状综述
+（已有研究成果梳理，注明来源）
+
+## 4. 研究争议与分歧
+（学界主要争论点）
+
+## 5. 研究空白与不足
+（现有研究的局限性）
+
+## 6. 研究展望
+（未来研究方向建议）
+
+## 参考文献
+（列出引用的来源）
+
+要求：学术规范，客观评述，注明出处。""",
+        "structure": "## 1. 研究背景\n## 2. 概念界定\n## 3. 研究现状\n## 4. 研究争议\n## 5. 研究空白\n## 6. 研究展望",
+    },
+    "pr": {
+        "label": "📰 舆情分析报告",
+        "desc": "舆论现状、关键声音、风险预警",
+        "system": """你是一位公关与舆情分析专家。请基于资料生成一份舆情分析报告，结构如下：
+
+## 一、舆情概况
+（事件/话题整体热度、时间线）
+
+## 二、主要声音分析
+（正面/负面/中性声音占比及代表性观点）
+
+## 三、关键意见领袖（KOL）
+（主要发声者、立场、影响力）
+
+## 四、媒体报道分析
+（主流媒体 vs 自媒体，报道角度差异）
+
+## 五、风险预警
+（潜在危机点、可能的舆情走向）
+
+## 六、应对建议
+（公关策略建议）
+
+要求：客观呈现，区分事实与观点，标注信息来源可信度。""",
+        "structure": "## 一、舆情概况\n## 二、声音分析\n## 三、KOL分析\n## 四、媒体分析\n## 五、风险预警\n## 六、应对建议",
+    },
+    "competitive": {
+        "label": "🔍 竞品分析报告",
+        "desc": "产品对比、优劣势、市场定位",
+        "system": """你是一位产品战略分析师。请基于资料生成一份竞品分析报告，结构如下：
+
+## 一、竞品概览
+（主要竞品列表及基本信息）
+
+## 二、功能对比矩阵
+（核心功能逐项对比，用表格呈现）
+
+## 三、定价策略对比
+（各竞品价格模型分析）
+
+## 四、优劣势分析
+（各竞品的核心优势与明显短板）
+
+## 五、市场定位与用户群体
+（各竞品的目标用户和差异化定位）
+
+## 六、竞争机会与策略建议
+（市场空白点、差异化切入方向）
+
+要求：数据对比清晰，表格直观，结论可操作。""",
+        "structure": "## 一、竞品概览\n## 二、功能对比\n## 三、定价对比\n## 四、优劣势\n## 五、市场定位\n## 六、竞争机会",
+    },
+}
+
+
+# ──────────────────────────────────────────────
+# 3. 多源交叉验证
+# ──────────────────────────────────────────────
+def cross_validate(sources: list, question: str) -> dict:
+    """
+    对搜集到的来源进行交叉验证：
+    - 提取关键结论
+    - 标注支持/反对/中立来源
+    - 评估各来源可信度
+    返回结构化验证结果
+    """
+    if not sources:
+        return {}
+
+    parts = "\n\n".join([
+        f"【来源{i+1}】{s['title']} ({s.get('domain', '')})\n{s.get('summary', '')}\n{s.get('key_points', '')[:300]}"
+        for i, s in enumerate(sources)
+    ])
+
+    prompt = f"""你是一位严谨的事实核查专家。针对研究主题"{question}"，对以下来源进行交叉验证分析。
+
+{parts}
+
+请返回 JSON，格式如下：
+{{
+  "key_claims": [
+    {{
+      "claim": "关键结论1（具体陈述）",
+      "support": [1, 3],
+      "oppose": [2],
+      "neutral": [],
+      "verdict": "confirmed 或 disputed 或 unverified",
+      "confidence": "high 或 medium 或 low"
+    }}
+  ],
+  "credibility": [
+    {{
+      "source_index": 1,
+      "score": 85,
+      "type": "权威机构 或 主流媒体 或 行业媒体 或 自媒体 或 未知",
+      "note": "简短说明"
+    }}
+  ],
+  "consensus": "各来源的主要共识（1-2句）",
+  "disputes": "主要争议点（1-2句，如无则填'无明显争议'）",
+  "reliability": "overall 可靠性评估：high/medium/low"
+}}
+
+只返回 JSON，不要其他内容。"""
+
+    try:
+        text = ai_generate(prompt).strip()
+        if "```" in text:
+            text = re.split(r"```(?:json)?", text)[1].strip().rstrip("`").strip()
+        return json.loads(text)
+    except Exception:
+        return {
+            "key_claims": [],
+            "credibility": [],
+            "consensus": "（验证解析失败）",
+            "disputes": "（验证解析失败）",
+            "reliability": "medium"
+        }
+
+
+# ──────────────────────────────────────────────
+# 4. 本地文档解析（RAG）
+# ──────────────────────────────────────────────
+def parse_uploaded_file(file_bytes: bytes, filename: str) -> str:
+    """
+    解析上传的本地文档，返回文本内容。
+    支持：PDF、DOCX、TXT、CSV、MD
+    """
+    ext = filename.rsplit(".", 1)[-1].lower()
+
+    try:
+        if ext == "pdf":
+            try:
+                import pypdf
+                import io
+                reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+                return text[:20000] if text.strip() else "（PDF 无法提取文本，可能是扫描件）"
+            except ImportError:
+                return "（需要安装 pypdf：pip install pypdf）"
+
+        elif ext == "docx":
+            try:
+                import docx
+                import io
+                doc = docx.Document(io.BytesIO(file_bytes))
+                text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+                return text[:20000]
+            except ImportError:
+                return "（需要安装 python-docx：pip install python-docx）"
+
+        elif ext == "csv":
+            try:
+                import pandas as pd
+                import io
+                df = pd.read_csv(io.BytesIO(file_bytes))
+                return df.to_string(max_rows=200)
+            except ImportError:
+                import io
+                text = file_bytes.decode("utf-8", errors="ignore")
+                return text[:10000]
+
+        elif ext in ("txt", "md"):
+            return file_bytes.decode("utf-8", errors="ignore")[:20000]
+
+        else:
+            return f"（不支持的文件格式：{ext}）"
+
+    except Exception as e:
+        return f"（文件解析失败：{e}）"
 
 last_question = ""
 last_reply = ""

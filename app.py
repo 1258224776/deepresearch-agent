@@ -14,7 +14,8 @@ from main import (
     reason, web_search, fetch_page_content,
     summarize_source, compile_digest,
     ai_extract, fetch_page_full, deep_scrape,
-    save_scraped, save_report, ai_generate, SYSTEM_PROMPT,
+    save_scraped, save_report, ai_generate,
+    TEMPLATES, cross_validate, parse_uploaded_file,
 )
 
 # ──────────────────────────────────────────────
@@ -543,13 +544,17 @@ div[data-testid="stStatusWidget"] {
 # Session State
 # ──────────────────────────────────────────────
 _defaults = {
-    "mode":    "home",
-    "phase":   "input",
-    "question":     "",
-    "sources":      [],
-    "reasoning_log":[],
-    "digest":       "",
-    "report":       "",
+    "mode":          "home",
+    "phase":         "input",
+    "question":      "",
+    "sources":       [],
+    "reasoning_log": [],
+    "digest":        "",
+    "report":        "",
+    "template":      "general",
+    "chat_history":  [],
+    "validation":    {},
+    "local_docs":    [],   # [{name, content}]
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -574,6 +579,36 @@ with st.sidebar:
         go_home(); st.rerun()
     st.divider()
 
+    # ── 本地文档上传 ──
+    st.markdown("**📂 上传本地文档**")
+    st.caption("研究时 AI 会将本地数据与网络资料交叉融合")
+    uploaded = st.file_uploader(
+        "支持 PDF / DOCX / TXT / CSV / MD",
+        type=["pdf", "docx", "txt", "csv", "md"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
+    )
+    if uploaded:
+        new_docs = []
+        for f in uploaded:
+            already = any(d["name"] == f.name for d in st.session_state.local_docs)
+            if not already:
+                content = parse_uploaded_file(f.read(), f.name)
+                new_docs.append({"name": f.name, "content": content})
+        if new_docs:
+            st.session_state.local_docs.extend(new_docs)
+            st.success(f"✅ 已加载 {len(new_docs)} 个文档")
+    if st.session_state.local_docs:
+        for doc in st.session_state.local_docs:
+            c1, c2 = st.columns([4, 1])
+            with c1:
+                st.markdown(f'<div class="file-item">📄 {doc["name"]}</div>', unsafe_allow_html=True)
+            with c2:
+                if st.button("✕", key=f"rm_{doc['name']}"):
+                    st.session_state.local_docs = [d for d in st.session_state.local_docs if d["name"] != doc["name"]]
+                    st.rerun()
+
+    st.divider()
     st.markdown("**🕷️ 手动爬取**")
     s_url  = st.text_input("网址", placeholder="https://example.com")
     s_inst = st.text_input("提取内容（可选）")
@@ -594,12 +629,12 @@ with st.sidebar:
     st.divider()
     st.markdown("**📁 已保存文件**")
     reports = sorted([f for f in os.listdir("reports") if f.endswith(".md")], reverse=True)[:4]
-    scraped = sorted([f for f in os.listdir("scraped") if f.endswith(".md")], reverse=True)[:4]
+    scraped_files = sorted([f for f in os.listdir("scraped") if f.endswith(".md")], reverse=True)[:4]
     for f in reports:
         st.markdown(f'<div class="file-item">📄 {f}</div>', unsafe_allow_html=True)
-    for f in scraped:
+    for f in scraped_files:
         st.markdown(f'<div class="file-item">🕷️ {f}</div>', unsafe_allow_html=True)
-    if not reports and not scraped:
+    if not reports and not scraped_files:
         st.markdown('<div class="file-item">暂无文件</div>', unsafe_allow_html=True)
 
 
@@ -702,11 +737,35 @@ elif st.session_state.mode == "scrape":
     # ── 输入 ──
     if st.session_state.phase == "input":
         st.markdown("""
-<div style="max-width:640px;margin:0 auto;padding:40px 0 20px;text-align:center">
-  <div style="font-size:1.8rem;font-weight:800;color:#f1f5f9;letter-spacing:-0.02em;margin-bottom:12px">你想搜索什么？</div>
-  <div style="font-size:0.93rem;color:#475569;margin-bottom:36px">描述你感兴趣的主题，AI 会自动规划搜索策略并抓取多个网页。</div>
+<div style="max-width:700px;margin:0 auto;padding:32px 0 16px;text-align:center">
+  <div style="font-size:1.8rem;font-weight:800;color:#f1f5f9;letter-spacing:-0.02em;margin-bottom:10px">你想搜索什么？</div>
+  <div style="font-size:0.93rem;color:#475569;margin-bottom:28px">描述你感兴趣的主题，AI 会自动规划搜索策略并抓取多个网页。</div>
 </div>
 """, unsafe_allow_html=True)
+
+        # 模板选择
+        st.markdown('<div style="font-size:0.8rem;color:#475569;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">选择报告模板</div>', unsafe_allow_html=True)
+        tcols = st.columns(3)
+        tkeys = list(TEMPLATES.keys())
+        for i, tk in enumerate(tkeys):
+            with tcols[i % 3]:
+                tpl = TEMPLATES[tk]
+                is_sel = st.session_state.template == tk
+                border = "rgba(99,102,241,0.6)" if is_sel else "rgba(255,255,255,0.07)"
+                bg = "rgba(99,102,241,0.10)" if is_sel else "rgba(255,255,255,0.02)"
+                st.markdown(f"""
+<div style="background:{bg};border:1px solid {border};border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer">
+  <div style="font-size:0.88rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">{tpl['label']}</div>
+  <div style="font-size:0.75rem;color:#475569">{tpl['desc']}</div>
+</div>""", unsafe_allow_html=True)
+                if st.button("选择" if not is_sel else "✓ 已选", key=f"tpl_s_{tk}", use_container_width=True):
+                    st.session_state.template = tk
+                    st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        # 显示本地文档提示
+        if st.session_state.local_docs:
+            st.info(f"📂 已加载 {len(st.session_state.local_docs)} 个本地文档，研究时将与网络资料交叉融合")
 
         with st.form("scrape_form"):
             q = st.text_input("搜索内容", placeholder="例如：特斯拉 2025 年最新车型发布信息", label_visibility="collapsed")
@@ -850,24 +909,75 @@ elif st.session_state.mode == "scrape":
                     go_home(); st.rerun()
 
         elif st.session_state.phase == "gen_report":
+            tpl_sys = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["system"]
             with st.spinner("📝 正在综合所有来源，生成完整报告..."):
                 ctx = "\n\n".join([
                     f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
                     for i, s in enumerate(sources)
                 ])
+                # 融合本地文档
+                local_ctx = ""
+                if st.session_state.local_docs:
+                    local_ctx = "\n\n【本地文档资料】\n" + "\n\n".join([
+                        f"《{d['name']}》\n{d['content'][:3000]}"
+                        for d in st.session_state.local_docs
+                    ])
                 report = ai_generate(
-                    f"以下是搜集到的资料：\n\n{ctx}\n\n请针对以下问题生成完整研究报告：{question}",
-                    system=SYSTEM_PROMPT,
+                    f"以下是搜集到的资料：\n\n{ctx}{local_ctx}\n\n请针对以下问题生成完整研究报告：{question}",
+                    system=tpl_sys,
                 )
             st.session_state.report = report
-            st.session_state.phase  = "report_ready"
+            st.session_state.chat_history = []
+            st.session_state.phase = "report_ready"
             st.rerun()
 
         elif st.session_state.phase == "report_ready":
-            st.markdown('<div class="section-title">研究报告</div>', unsafe_allow_html=True)
+            tpl_label = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["label"]
+            st.markdown(f'<div class="section-title">研究报告 · {tpl_label}</div>', unsafe_allow_html=True)
+
+            # ── 交叉验证按钮 ──
+            if not st.session_state.validation:
+                if st.button("🔬 运行多源交叉验证", use_container_width=False):
+                    with st.spinner("AI 正在分析各来源的一致性与争议点..."):
+                        st.session_state.validation = cross_validate(sources, question)
+                    st.rerun()
+
+            # ── 显示交叉验证结果 ──
+            if st.session_state.validation:
+                val = st.session_state.validation
+                reliability_color = {"high": "#34d399", "medium": "#fbbf24", "low": "#f87171"}.get(val.get("reliability", "medium"), "#fbbf24")
+                st.markdown(f"""
+<div style="background:rgba(15,23,42,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:20px 24px;margin-bottom:20px">
+  <div style="font-size:0.72rem;font-weight:700;color:#475569;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:14px">🔬 多源交叉验证结果</div>
+  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
+    <div><span style="font-size:0.78rem;color:#64748b">整体可靠性</span><br><span style="font-size:1.1rem;font-weight:700;color:{reliability_color}">{val.get('reliability','').upper()}</span></div>
+    <div style="flex:1"><span style="font-size:0.78rem;color:#64748b">共识</span><br><span style="font-size:0.86rem;color:#cbd5e1">{val.get('consensus','')}</span></div>
+  </div>
+  <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:8px;padding:10px 14px;font-size:0.84rem;color:#fbbf24">
+    ⚡ 争议点：{val.get('disputes', '无明显争议')}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+                # 关键结论验证
+                claims = val.get("key_claims", [])
+                if claims:
+                    with st.expander(f"📋 关键结论验证（{len(claims)} 条）", expanded=False):
+                        for c in claims:
+                            verdict_map = {"confirmed": ("✅", "#34d399"), "disputed": ("⚠️", "#fbbf24"), "unverified": ("❓", "#94a3b8")}
+                            icon, color = verdict_map.get(c.get("verdict", "unverified"), ("❓", "#94a3b8"))
+                            st.markdown(f"""
+<div style="border-left:3px solid {color};padding:8px 14px;margin-bottom:10px;background:rgba(255,255,255,0.02);border-radius:0 8px 8px 0">
+  <span style="font-size:0.75rem;color:{color};font-weight:700">{icon} {c.get('verdict','').upper()}</span>
+  <div style="font-size:0.88rem;color:#e2e8f0;margin-top:4px">{c.get('claim','')}</div>
+  <div style="font-size:0.75rem;color:#475569;margin-top:4px">支持来源: {c.get('support',[])} · 反对来源: {c.get('oppose',[])}</div>
+</div>""", unsafe_allow_html=True)
+
+            # ── 报告正文 ──
             st.markdown('<div class="report-wrap">', unsafe_allow_html=True)
             st.markdown(st.session_state.report)
             st.markdown('</div>', unsafe_allow_html=True)
+
+            # ── 操作按钮 ──
             st.markdown("")
             c1, c2, c3 = st.columns([2, 2, 1])
             with c1:
@@ -876,13 +986,43 @@ elif st.session_state.mode == "scrape":
                     st.success(f"✅ 已保存：{fp}")
             with c2:
                 if st.button("🔍 搜索新内容", use_container_width=True):
-                    st.session_state.phase  = "input"
+                    st.session_state.phase = "input"
                     st.session_state.report = ""
                     st.session_state.sources = []
+                    st.session_state.validation = {}
+                    st.session_state.chat_history = []
                     st.rerun()
             with c3:
                 if st.button("🏠 首页", use_container_width=True):
                     go_home(); st.rerun()
+
+            # ── Chat with Report ──
+            st.markdown('<div class="section-title" style="margin-top:36px">💬 追问报告</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size:0.82rem;color:#475569;margin-bottom:16px">基于本次研究内容继续提问，AI 会结合报告和原始资料回答</div>', unsafe_allow_html=True)
+
+            # 显示历史消息
+            for msg in st.session_state.chat_history:
+                with st.chat_message(msg["role"], avatar="🧑" if msg["role"] == "user" else "🤖"):
+                    st.markdown(msg["content"])
+
+            # 输入框
+            chat_input = st.chat_input("继续追问，例如：帮我展开第二部分的竞品数据...")
+            if chat_input:
+                st.session_state.chat_history.append({"role": "user", "content": chat_input})
+                with st.chat_message("user", avatar="🧑"):
+                    st.markdown(chat_input)
+                with st.chat_message("assistant", avatar="🤖"):
+                    with st.spinner("思考中..."):
+                        history_ctx = "\n".join([
+                            f"{'用户' if m['role']=='user' else 'AI'}: {m['content']}"
+                            for m in st.session_state.chat_history[:-1]
+                        ])
+                        answer = ai_generate(
+                            f"研究主题：{question}\n\n研究报告：\n{st.session_state.report[:4000]}\n\n{'对话历史：\n' + history_ctx if history_ctx else ''}\n\n用户追问：{chat_input}",
+                            system="你是一位专业研究助手，基于已有的研究报告和资料回答用户的追问。回答要简洁精准，如需引用报告内容请注明。"
+                        )
+                    st.markdown(answer)
+                st.session_state.chat_history.append({"role": "assistant", "content": answer})
 
 
 # ══════════════════════════════════════════════
@@ -906,11 +1046,34 @@ elif st.session_state.mode == "direct":
 
     if st.session_state.phase == "input":
         st.markdown("""
-<div style="max-width:640px;margin:0 auto;padding:40px 0 20px;text-align:center">
-  <div style="font-size:1.8rem;font-weight:800;color:#f1f5f9;letter-spacing:-0.02em;margin-bottom:12px">你想研究什么问题？</div>
-  <div style="font-size:0.93rem;color:#475569;margin-bottom:36px">AI 会自动搜索多方资料、综合分析，直接生成一份完整的研究报告。</div>
+<div style="max-width:700px;margin:0 auto;padding:32px 0 16px;text-align:center">
+  <div style="font-size:1.8rem;font-weight:800;color:#f1f5f9;letter-spacing:-0.02em;margin-bottom:10px">你想研究什么问题？</div>
+  <div style="font-size:0.93rem;color:#475569;margin-bottom:28px">AI 会自动搜索多方资料、综合分析，直接生成一份完整的研究报告。</div>
 </div>
 """, unsafe_allow_html=True)
+
+        # 模板选择
+        st.markdown('<div style="font-size:0.8rem;color:#475569;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">选择报告模板</div>', unsafe_allow_html=True)
+        tcols2 = st.columns(3)
+        tkeys2 = list(TEMPLATES.keys())
+        for i, tk in enumerate(tkeys2):
+            with tcols2[i % 3]:
+                tpl = TEMPLATES[tk]
+                is_sel = st.session_state.template == tk
+                border = "rgba(99,102,241,0.6)" if is_sel else "rgba(255,255,255,0.07)"
+                bg = "rgba(99,102,241,0.10)" if is_sel else "rgba(255,255,255,0.02)"
+                st.markdown(f"""
+<div style="background:{bg};border:1px solid {border};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+  <div style="font-size:0.88rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">{tpl['label']}</div>
+  <div style="font-size:0.75rem;color:#475569">{tpl['desc']}</div>
+</div>""", unsafe_allow_html=True)
+                if st.button("选择" if not is_sel else "✓ 已选", key=f"tpl_d_{tk}", use_container_width=True):
+                    st.session_state.template = tk
+                    st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.session_state.local_docs:
+            st.info(f"📂 已加载 {len(st.session_state.local_docs)} 个本地文档，将与网络资料交叉融合")
 
         with st.form("direct_form"):
             q = st.text_input("研究问题", placeholder="例如：2025 年 AI 大模型行业竞争格局分析", label_visibility="collapsed")
@@ -922,6 +1085,7 @@ elif st.session_state.mode == "direct":
 
     elif st.session_state.phase == "generating":
         question = st.session_state.question
+        tpl_sys = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["system"]
         st.markdown(f"""
 <div style="margin-bottom:24px">
   <div style="font-size:1.3rem;font-weight:700;color:#f1f5f9;margin-bottom:6px">📝 正在生成报告：{question}</div>
@@ -948,41 +1112,55 @@ elif st.session_state.mode == "direct":
                     content = fetch_page_content(url)
                     if "抓取失败" in content or len(content) < 100: continue
                     sources.append({"title": title, "url": url,
-                                    "domain": domain, "raw_content": content})
+                                    "domain": domain, "raw_content": content,
+                                    "summary": "", "key_points": "", "relevance": "medium"})
 
             st.write(f"✅ 共收集 {len(sources)} 个来源，正在综合分析...")
             ctx = "\n\n".join([
                 f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
                 for i, s in enumerate(sources)
             ])
+            local_ctx = ""
+            if st.session_state.local_docs:
+                local_ctx = "\n\n【本地文档资料】\n" + "\n\n".join([
+                    f"《{d['name']}》\n{d['content'][:3000]}"
+                    for d in st.session_state.local_docs
+                ])
+                st.write(f"📂 融合 {len(st.session_state.local_docs)} 个本地文档...")
+
             report = ai_generate(
-                f"以下资料：\n\n{ctx}\n\n问题：{question}\n\n请生成完整研究报告。",
-                system=SYSTEM_PROMPT,
+                f"以下资料：\n\n{ctx}{local_ctx}\n\n问题：{question}\n\n请生成完整研究报告。",
+                system=tpl_sys,
             )
             status.update(label="✅ 报告生成完成", state="complete", expanded=False)
 
         st.session_state.sources = sources
         st.session_state.report  = report
+        st.session_state.chat_history = []
+        st.session_state.validation = {}
         st.session_state.phase   = "done"
         st.rerun()
 
     elif st.session_state.phase == "done":
         question = st.session_state.question
         sources  = st.session_state.sources
+        tpl_label = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["label"]
 
         st.markdown(f"""
-<div style="margin-bottom:20px">
-  <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;letter-spacing:-0.01em">📋 研究报告：{question}</div>
+<div style="margin-bottom:16px">
+  <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;letter-spacing:-0.01em">📋 {question}</div>
 </div>
 """, unsafe_allow_html=True)
 
         st.markdown(f"""
 <div class="stat-bar">
   <div class="stat-chip">📚 参考来源 <span class="val">{len(sources)}</span></div>
+  <div class="stat-chip">📋 模板 <span class="val">{tpl_label}</span></div>
+  {'<div class="stat-chip">📂 本地文档 <span class="val">' + str(len(st.session_state.local_docs)) + '</span></div>' if st.session_state.local_docs else ''}
 </div>
 """, unsafe_allow_html=True)
 
-        with st.expander(f"📚 查看参考来源（{len(sources)} 个）", expanded=False):
+        with st.expander(f"📚 参考来源（{len(sources)} 个）", expanded=False):
             for i, s in enumerate(sources):
                 st.markdown(
                     f'<span style="background:rgba(99,102,241,0.12);color:#818cf8;border-radius:5px;'
@@ -992,6 +1170,29 @@ elif st.session_state.mode == "direct":
                     unsafe_allow_html=True,
                 )
 
+        # 交叉验证
+        if not st.session_state.validation:
+            if st.button("🔬 运行多源交叉验证", key="val_direct"):
+                with st.spinner("AI 正在分析各来源的一致性与争议点..."):
+                    st.session_state.validation = cross_validate(sources, question)
+                st.rerun()
+
+        if st.session_state.validation:
+            val = st.session_state.validation
+            reliability_color = {"high": "#34d399", "medium": "#fbbf24", "low": "#f87171"}.get(val.get("reliability", "medium"), "#fbbf24")
+            st.markdown(f"""
+<div style="background:rgba(15,23,42,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:20px 24px;margin-bottom:20px">
+  <div style="font-size:0.72rem;font-weight:700;color:#475569;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:14px">🔬 多源交叉验证结果</div>
+  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
+    <div><span style="font-size:0.78rem;color:#64748b">整体可靠性</span><br><span style="font-size:1.1rem;font-weight:700;color:{reliability_color}">{val.get('reliability','').upper()}</span></div>
+    <div style="flex:1"><span style="font-size:0.78rem;color:#64748b">共识</span><br><span style="font-size:0.86rem;color:#cbd5e1">{val.get('consensus','')}</span></div>
+  </div>
+  <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:8px;padding:10px 14px;font-size:0.84rem;color:#fbbf24">
+    ⚡ 争议点：{val.get('disputes', '无明显争议')}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        st.markdown(f'<div class="section-title">研究报告 · {tpl_label}</div>', unsafe_allow_html=True)
         st.markdown('<div class="report-wrap">', unsafe_allow_html=True)
         st.markdown(st.session_state.report)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -999,7 +1200,7 @@ elif st.session_state.mode == "direct":
 
         c1, c2, c3 = st.columns([2, 2, 1])
         with c1:
-            if st.button("💾 保存报告", type="primary", use_container_width=True):
+            if st.button("💾 保存报告", type="primary", use_container_width=True, key="save_direct"):
                 fp = save_report(question, st.session_state.report)
                 st.success(f"✅ 已保存：{fp}")
         with c2:
@@ -1007,7 +1208,35 @@ elif st.session_state.mode == "direct":
                 st.session_state.phase = "input"
                 st.session_state.report = ""
                 st.session_state.sources = []
+                st.session_state.validation = {}
+                st.session_state.chat_history = []
                 st.rerun()
         with c3:
-            if st.button("🏠 首页", use_container_width=True):
+            if st.button("🏠 首页", use_container_width=True, key="home_direct"):
                 go_home(); st.rerun()
+
+        # ── Chat with Report ──
+        st.markdown('<div class="section-title" style="margin-top:36px">💬 追问报告</div>', unsafe_allow_html=True)
+        st.markdown('<div style="font-size:0.82rem;color:#475569;margin-bottom:16px">基于本次研究内容继续提问</div>', unsafe_allow_html=True)
+
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"], avatar="🧑" if msg["role"] == "user" else "🤖"):
+                st.markdown(msg["content"])
+
+        chat_input2 = st.chat_input("继续追问，例如：帮我把竞品数据做成表格...", key="chat_direct")
+        if chat_input2:
+            st.session_state.chat_history.append({"role": "user", "content": chat_input2})
+            with st.chat_message("user", avatar="🧑"):
+                st.markdown(chat_input2)
+            with st.chat_message("assistant", avatar="🤖"):
+                with st.spinner("思考中..."):
+                    history_ctx = "\n".join([
+                        f"{'用户' if m['role']=='user' else 'AI'}: {m['content']}"
+                        for m in st.session_state.chat_history[:-1]
+                    ])
+                    answer = ai_generate(
+                        f"研究主题：{question}\n\n研究报告：\n{st.session_state.report[:4000]}\n\n{'对话历史：\n' + history_ctx if history_ctx else ''}\n\n用户追问：{chat_input2}",
+                        system="你是一位专业研究助手，基于已有的研究报告和资料回答用户的追问。回答要简洁精准。"
+                    )
+                st.markdown(answer)
+            st.session_state.chat_history.append({"role": "assistant", "content": answer})
