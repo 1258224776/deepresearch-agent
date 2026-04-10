@@ -38,7 +38,18 @@ USER_AGENTS = [
 # ──────────────────────────────────────────────
 # 1. 初始化 Gemini 客户端
 # ──────────────────────────────────────────────
-client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+# 本地从 .env 读取，云端从 Streamlit Secrets 读取
+def _get_api_key():
+    key = os.environ.get("GOOGLE_API_KEY")
+    if not key:
+        try:
+            import streamlit as st
+            key = st.secrets.get("GOOGLE_API_KEY", "")
+        except Exception:
+            pass
+    return key
+
+client = genai.Client(api_key=_get_api_key())
 
 # ──────────────────────────────────────────────
 # 2. 系统提示词
