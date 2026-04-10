@@ -27,6 +27,14 @@ import httpx                            # pip install httpx
 import trafilatura                      # pip install trafilatura
 from bs4 import BeautifulSoup          # pip install beautifulsoup4
 
+# 多 User-Agent 轮换，提高爬取成功率
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
+]
+
 # ──────────────────────────────────────────────
 # 1. 初始化 Gemini 客户端
 # ──────────────────────────────────────────────
@@ -69,22 +77,51 @@ os.makedirs("scraped", exist_ok=True)  # 爬取的内容单独存这里
 # ──────────────────────────────────────────────
 # 工具1：抓取单个网页正文
 # ──────────────────────────────────────────────
-def fetch_page_content(url: str, max_chars: int = 2000) -> str:
+def fetch_page_content(url: str, max_chars: int = 6000) -> str:
     """
-    抓取指定网页的正文内容（过滤广告、导航栏等噪音）。
-    返回纯文字正文，限制 max_chars 字符。
+    抓取指定网页正文。
+    策略：轮换 UA → trafilatura（高精度） → BeautifulSoup 兜底。
     """
-    try:
-        resp = httpx.get(
-            url, timeout=10, follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-        )
-        content = trafilatura.extract(resp.text, include_comments=False, include_tables=True)
-        if content:
-            return content[:max_chars]
-        return "（页面无法提取正文，可能是动态渲染页面）"
-    except Exception as e:
-        return f"（抓取失败: {type(e).__name__}）"
+    for ua in USER_AGENTS:
+        try:
+            resp = httpx.get(
+                url, timeout=14, follow_redirects=True,
+                headers={
+                    "User-Agent": ua,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "Accept-Encoding": "gzip, deflate",
+                }
+            )
+            if resp.status_code >= 400:
+                continue
+
+            # ① trafilatura 优先（召回率优先模式）
+            content = trafilatura.extract(
+                resp.text,
+                include_comments=False,
+                include_tables=True,
+                favor_recall=True,
+                no_fallback=False,
+            )
+            if content and len(content) > 150:
+                return content[:max_chars]
+
+            # ② BeautifulSoup 兜底：去除噪音标签后提取纯文本
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for tag in soup(["script", "style", "nav", "header", "footer",
+                              "aside", "advertisement", "figure"]):
+                tag.decompose()
+            lines = [ln.strip() for ln in soup.get_text(separator="\n").splitlines()
+                     if len(ln.strip()) > 25]
+            text = "\n".join(lines)
+            if text:
+                return text[:max_chars]
+
+        except Exception:
+            continue
+
+    return "（页面抓取失败，可能为动态渲染或访问受限）"
 
 
 def fetch_page_full(url: str) -> tuple[str, list[str]]:
@@ -206,26 +243,72 @@ def deep_scrape(start_url: str, max_pages: int = 5) -> str:
 # 工具4：AI 从爬取内容中提取目标信息
 # ──────────────────────────────────────────────
 def extract_key_points(content: str, question: str) -> str:
+    """返回与问题相关的要点列表（Markdown）。"""
+    prompt = f"""从以下网页内容中，提取与"{question}"最相关的 4-6 个关键信息点。
+要求：每条以 "• " 开头，一句话，包含具体数据或观点；去掉广告/导航噪音；只返回要点列表。
+网页内容：\n{content[:4000]}"""
+    return client.models.generate_content(
+        model="gemini-3.1-pro-preview", contents=prompt
+    ).text
+
+
+def summarize_source(content: str, question: str, title: str) -> dict:
     """
-    让 AI 从网页内容中提取与研究问题相关的 3-5 个关键信息点。
-    返回 Markdown 格式的要点列表。
+    对单个网页生成结构化摘要。
+    返回 {"summary": str, "key_points": str, "relevance": "high|medium|low"}
     """
-    prompt = f"""从以下网页内容中，提取与"{question}"最相关的 3-5 个关键信息点。
+    prompt = f"""你是信息提炼专家。针对研究主题"{question}"，分析以下网页。
+
+标题：{title}
+内容：
+{content[:5000]}
+
+请严格返回 JSON，格式：
+{{
+  "summary": "2-3句核心摘要，说明本页主要内容及与主题的关系",
+  "key_points": "4-6个要点，每点以 • 开头，包含具体数据/事实/观点",
+  "relevance": "high 或 medium 或 low"
+}}
+只返回 JSON，不要其他内容。"""
+
+    try:
+        text = client.models.generate_content(
+            model="gemini-3.1-pro-preview", contents=prompt
+        ).text.strip()
+        if "```" in text:
+            text = re.split(r"```(?:json)?", text)[1].strip().rstrip("`").strip()
+        return json.loads(text)
+    except Exception:
+        return {
+            "summary": "内容提炼失败",
+            "key_points": extract_key_points(content, question),
+            "relevance": "medium",
+        }
+
+
+def compile_digest(sources: list, question: str) -> str:
+    """
+    将所有来源内容整合成一份连贯的内容概述（3-5 段）。
+    """
+    if not sources:
+        return ""
+    parts = "\n\n".join([
+        f"【来源{i+1}：{s['title']}】\n{s.get('summary', '')}\n{s.get('key_points', s.get('raw_content', '')[:500])}"
+        for i, s in enumerate(sources)
+    ])
+    prompt = f"""基于以下多个来源，针对"{question}"写一份综合性内容概述。
+
+{parts}
 
 要求：
-- 每条信息以 "• " 开头，一句话表达，要有具体数据/观点
-- 去掉无关的广告、导航等噪音
-- 只返回要点列表，不加任何前缀或解释
-- 如果内容与问题无关，只返回"• 该页面与问题相关性较低"
+- 3-5 段，每段聚焦一个维度（如：现状、趋势、数据、争议、结论等）
+- 整合各来源信息，标注差异或共识
+- 客观陈述，有具体数据支撑
+- 用中文，专业流畅"""
 
-网页内容：
-{content[:3000]}"""
-
-    response = client.models.generate_content(
-        model="gemini-3.1-pro-preview",
-        contents=prompt
-    )
-    return response.text
+    return client.models.generate_content(
+        model="gemini-3.1-pro-preview", contents=prompt
+    ).text
 
 
 def ai_extract(content: str, instruction: str) -> str:
@@ -273,7 +356,7 @@ def reason(question: str) -> dict:
   "question_type": "问题类型，从以下选一个：实时信息/深度研究/简单事实/闲聊对话",
   "need_search": true 或 false,
   "reasoning": "你的分析思路，解释为什么这样处理（2-4句话）",
-  "search_queries": ["搜索词1", "搜索词2", "搜索词3"],
+  "search_queries": ["搜索词1", "搜索词2", "搜索词3", "搜索词4", "搜索词5"],
   "answer_direct": "如果 need_search 为 false，在这里直接给出完整回答；否则留空字符串"
 }}
 
@@ -312,7 +395,7 @@ def reason(question: str) -> dict:
 # 研究功能（原有逻辑）
 # ══════════════════════════════════════════════
 
-def web_search(query: str, max_results: int = 3) -> list[dict]:
+def web_search(query: str, max_results: int = 5) -> list[dict]:
     results = []
     with DDGS() as ddgs:
         for r in ddgs.text(query, max_results=max_results):
