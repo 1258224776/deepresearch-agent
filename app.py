@@ -464,7 +464,7 @@ elif st.session_state.mode == "scrape":
         elif st.session_state.phase == "gen_report":
             with st.spinner("📝 正在综合所有来源，生成完整报告..."):
                 chat = client.chats.create(
-                    model="gemini-2.0-flash",
+                    model="gemini-2.0-flash-lite",
                     config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
                 )
                 ctx = "\n\n".join([
@@ -548,7 +548,7 @@ elif st.session_state.mode == "direct":
 
             st.write(f"✅ 共收集 {len(sources)} 个来源，正在综合分析...")
             chat = client.chats.create(
-                model="gemini-2.0-flash",
+                model="gemini-2.0-flash-lite",
                 config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
             )
             ctx = "\n\n".join([
