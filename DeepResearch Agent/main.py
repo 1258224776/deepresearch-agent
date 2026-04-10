@@ -205,6 +205,29 @@ def deep_scrape(start_url: str, max_pages: int = 5) -> str:
 # ──────────────────────────────────────────────
 # 工具4：AI 从爬取内容中提取目标信息
 # ──────────────────────────────────────────────
+def extract_key_points(content: str, question: str) -> str:
+    """
+    让 AI 从网页内容中提取与研究问题相关的 3-5 个关键信息点。
+    返回 Markdown 格式的要点列表。
+    """
+    prompt = f"""从以下网页内容中，提取与"{question}"最相关的 3-5 个关键信息点。
+
+要求：
+- 每条信息以 "• " 开头，一句话表达，要有具体数据/观点
+- 去掉无关的广告、导航等噪音
+- 只返回要点列表，不加任何前缀或解释
+- 如果内容与问题无关，只返回"• 该页面与问题相关性较低"
+
+网页内容：
+{content[:3000]}"""
+
+    response = client.models.generate_content(
+        model="gemini-3.1-pro-preview",
+        contents=prompt
+    )
+    return response.text
+
+
 def ai_extract(content: str, instruction: str) -> str:
     """
     让 Gemini 从爬取的网页内容中，按 instruction 提取你想要的信息。
