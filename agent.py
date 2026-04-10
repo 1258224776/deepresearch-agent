@@ -251,6 +251,11 @@ def run_research(
         if progress_callback:
             progress_callback(step, total, msg)
 
+    # 预热：在主线程中把所有 API Key 缓存好，子线程直接读缓存
+    for _cfg in PROVIDERS.values():
+        load_secret(_cfg["env"])
+    load_secret("AI_PROVIDER_ORDER")
+
     # Step 1: 推理规划
     cb(0, 10, "🧠 分析主题，规划搜索角度...")
     plan = reason(question)

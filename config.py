@@ -51,8 +51,15 @@ SEARCH_MAX_RESULTS = 5
 SEARCH_MAX_QUERIES = 4
 
 
+_secret_cache: dict[str, str] = {}
+
+
 def load_secret(key: str) -> str:
-    """先读环境变量，再尝试 Streamlit Secrets（云端部署时用）。"""
+    """先读环境变量，再尝试 Streamlit Secrets（云端部署时用）。
+    结果会被缓存，以便在 ThreadPoolExecutor 子线程中也能正常读取。
+    """
+    if key in _secret_cache:
+        return _secret_cache[key]
     val = os.environ.get(key, "")
     if not val:
         try:
@@ -60,4 +67,5 @@ def load_secret(key: str) -> str:
             val = st.secrets.get(key, "") or ""
         except Exception:
             pass
+    _secret_cache[key] = val
     return val
