@@ -1,22 +1,21 @@
 """
-DeepResearch Agent — v5
-UI/UX Pro Max 重设计：Glassmorphism 暗色科技风
+DeepResearch Agent — v6
+企业级模块化重构 + 并行爬取 + 总进度条 + 爬取汇总
 """
 
 import os
 import streamlit as st
-from urllib.parse import urlparse
 
-from dotenv import load_dotenv
-load_dotenv()
-
-from main import (
-    reason, web_search, fetch_page_content,
-    summarize_source, compile_digest,
-    ai_extract, fetch_page_full, deep_scrape,
-    save_scraped, save_report, ai_generate,
-    TEMPLATES, cross_validate, parse_uploaded_file,
+from agent import (
+    ai_generate, reason, summarize_source, compile_digest,
+    ai_extract, cross_validate, generate_scrape_digest,
+    chat_with_report, run_research,
 )
+from tools import (
+    web_search, fetch_page_content, fetch_page_full,
+    deep_scrape, save_scraped, save_report, parse_uploaded_file,
+)
+from prompts import TEMPLATES
 
 # ──────────────────────────────────────────────
 # 页面配置
@@ -779,50 +778,27 @@ elif st.session_state.mode == "scrape":
     elif st.session_state.phase == "searching":
         question = st.session_state.question
         st.markdown(f"""
-<div style="margin-bottom:24px">
+<div style="margin-bottom:16px">
   <div style="font-size:1.3rem;font-weight:700;color:#f1f5f9;margin-bottom:6px">🔍 正在研究：{question}</div>
-  <div style="font-size:0.83rem;color:#475569">AI 正在规划搜索角度并抓取内容，请稍候...</div>
+  <div style="font-size:0.83rem;color:#475569">AI 并行爬取中，请稍候...</div>
 </div>
 """, unsafe_allow_html=True)
 
-        with st.status("深度搜索爬取中...", expanded=True) as status:
-            st.write("🧠 分析主题，规划搜索角度...")
-            plan    = reason(question)
-            queries = (plan.get("search_queries") or [question])[:4]
-            log = [
-                f"**分析：** {plan.get('reasoning', '')}",
-                f"**搜索角度（{len(queries)} 个）：** {' · '.join(queries)}",
-            ]
-            st.write(f"📋 从 **{len(queries)}** 个角度搜索，每角度取 **5** 条")
+        # 总进度条
+        prog_bar  = st.progress(0, text="初始化...")
+        prog_text = st.empty()
 
-            sources, seen = [], set()
-            for i, query in enumerate(queries, 1):
-                st.write(f"🔎 [{i}/{len(queries)}] 搜索「{query}」...")
-                results = web_search(query, max_results=5)
-                st.write(f"   找到 {len(results)} 条，开始爬取...")
-                for r in results:
-                    url = r.get("href", "")
-                    if not url or url in seen: continue
-                    seen.add(url)
-                    title  = r.get("title", "无标题")
-                    domain = urlparse(url).netloc
-                    st.write(f"   📄 {title[:50]}...")
-                    content = fetch_page_content(url)
-                    if "抓取失败" in content or len(content) < 100: continue
-                    info = summarize_source(content, question, title)
-                    sources.append({
-                        "title":      title,
-                        "url":        url,
-                        "domain":     domain,
-                        "summary":    info.get("summary", ""),
-                        "key_points": info.get("key_points", ""),
-                        "relevance":  info.get("relevance", "medium"),
-                        "raw_content": content,
-                    })
+        def on_progress(step, total, msg):
+            pct = int(step / total * 100)
+            prog_bar.progress(pct, text=msg)
+            prog_text.markdown(
+                f'<div style="font-size:0.81rem;color:#64748b;padding:2px 0">{msg}</div>',
+                unsafe_allow_html=True,
+            )
 
-            st.write(f"✅ 爬取完毕，共 {len(sources)} 个有效来源，正在汇总...")
-            digest = compile_digest(sources, question) if sources else ""
-            status.update(label=f"✅ 完成！{len(sources)} 个来源", state="complete", expanded=False)
+        sources, digest, log = run_research(question, progress_callback=on_progress)
+        prog_bar.progress(100, text="✅ 完成")
+        prog_text.empty()
 
         st.session_state.sources       = sources
         st.session_state.reasoning_log = log
@@ -895,17 +871,39 @@ elif st.session_state.mode == "scrape":
         st.markdown("---")
 
         if st.session_state.phase == "sources_ready":
-            c1, c2, c3 = st.columns([3, 2, 1])
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
             with c1:
-                if st.button("📝 基于以上内容生成研究报告", type="primary", use_container_width=True):
+                if st.button("📝 生成研究报告", type="primary", use_container_width=True):
                     st.session_state.phase = "gen_report"; st.rerun()
             with c2:
+                if st.button("📋 生成内容汇总", use_container_width=True):
+                    st.session_state.phase = "scrape_digest"; st.rerun()
+            with c3:
                 if st.button("🔍 重新搜索", use_container_width=True):
                     for k in ["sources", "digest", "reasoning_log", "report"]:
                         st.session_state[k] = [] if k not in ("digest", "report") else ""
                     st.session_state.phase = "input"; st.rerun()
-            with c3:
+            with c4:
                 if st.button("🏠 首页", use_container_width=True):
+                    go_home(); st.rerun()
+
+        elif st.session_state.phase == "scrape_digest":
+            with st.spinner("📋 AI 正在生成内容汇总..."):
+                scrape_sum = generate_scrape_digest(sources, question)
+            st.markdown('<div class="section-title">内容汇总报告</div>', unsafe_allow_html=True)
+            st.markdown('<div class="report-wrap">', unsafe_allow_html=True)
+            st.markdown(scrape_sum)
+            st.markdown('</div>', unsafe_allow_html=True)
+            sc1, sc2, sc3 = st.columns([2, 2, 1])
+            with sc1:
+                if st.button("💾 保存汇总", type="primary", use_container_width=True):
+                    fp = save_report(f"爬取汇总：{question}", scrape_sum)
+                    st.success(f"✅ 已保存：{fp}")
+            with sc2:
+                if st.button("📝 继续生成研究报告", use_container_width=True):
+                    st.session_state.phase = "gen_report"; st.rerun()
+            with sc3:
+                if st.button("🏠 首页", use_container_width=True, key="home_sd"):
                     go_home(); st.rerun()
 
         elif st.session_state.phase == "gen_report":
@@ -1013,13 +1011,9 @@ elif st.session_state.mode == "scrape":
                     st.markdown(chat_input)
                 with st.chat_message("assistant", avatar="🤖"):
                     with st.spinner("思考中..."):
-                        history_ctx = "\n".join([
-                            f"{'用户' if m['role']=='user' else 'AI'}: {m['content']}"
-                            for m in st.session_state.chat_history[:-1]
-                        ])
-                        answer = ai_generate(
-                            f"研究主题：{question}\n\n研究报告：\n{st.session_state.report[:4000]}\n\n{'对话历史：\n' + history_ctx if history_ctx else ''}\n\n用户追问：{chat_input}",
-                            system="你是一位专业研究助手，基于已有的研究报告和资料回答用户的追问。回答要简洁精准，如需引用报告内容请注明。"
+                        answer = chat_with_report(
+                            question, st.session_state.report,
+                            st.session_state.chat_history[:-1], chat_input,
                         )
                     st.markdown(answer)
                 st.session_state.chat_history.append({"role": "assistant", "content": answer})
@@ -1085,37 +1079,31 @@ elif st.session_state.mode == "direct":
 
     elif st.session_state.phase == "generating":
         question = st.session_state.question
-        tpl_sys = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["system"]
+        tpl_sys  = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["system"]
+
         st.markdown(f"""
-<div style="margin-bottom:24px">
+<div style="margin-bottom:16px">
   <div style="font-size:1.3rem;font-weight:700;color:#f1f5f9;margin-bottom:6px">📝 正在生成报告：{question}</div>
-  <div style="font-size:0.83rem;color:#475569">AI 正在搜索并综合多方资料，请稍候...</div>
+  <div style="font-size:0.83rem;color:#475569">AI 并行搜索中，请稍候...</div>
 </div>
 """, unsafe_allow_html=True)
 
-        with st.status("深度研究进行中...", expanded=True) as status:
-            st.write("🧠 分析问题...")
-            plan    = reason(question)
-            queries = (plan.get("search_queries") or [question])[:4]
-            st.write(f"🔎 从 {len(queries)} 个角度搜索")
+        prog_bar2  = st.progress(0, text="初始化...")
+        prog_text2 = st.empty()
 
-            sources, seen = [], set()
-            for i, query in enumerate(queries, 1):
-                st.write(f"🔎 [{i}/{len(queries)}] 搜索「{query}」...")
-                for r in web_search(query, max_results=5):
-                    url = r.get("href", "")
-                    if not url or url in seen: continue
-                    seen.add(url)
-                    title   = r.get("title", "无标题")
-                    domain  = urlparse(url).netloc
-                    st.write(f"   📄 {title[:50]}...")
-                    content = fetch_page_content(url)
-                    if "抓取失败" in content or len(content) < 100: continue
-                    sources.append({"title": title, "url": url,
-                                    "domain": domain, "raw_content": content,
-                                    "summary": "", "key_points": "", "relevance": "medium"})
+        def on_progress2(step, total, msg):
+            pct = int(step / total * 100)
+            prog_bar2.progress(pct, text=msg)
+            prog_text2.markdown(
+                f'<div style="font-size:0.81rem;color:#64748b;padding:2px 0">{msg}</div>',
+                unsafe_allow_html=True,
+            )
 
-            st.write(f"✅ 共收集 {len(sources)} 个来源，正在综合分析...")
+        sources, _, _ = run_research(question, progress_callback=on_progress2)
+        prog_bar2.progress(100, text="✅ 数据收集完成，生成报告中...")
+        prog_text2.empty()
+
+        with st.spinner("📝 AI 综合分析，生成报告..."):
             ctx = "\n\n".join([
                 f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
                 for i, s in enumerate(sources)
@@ -1126,19 +1114,16 @@ elif st.session_state.mode == "direct":
                     f"《{d['name']}》\n{d['content'][:3000]}"
                     for d in st.session_state.local_docs
                 ])
-                st.write(f"📂 融合 {len(st.session_state.local_docs)} 个本地文档...")
-
             report = ai_generate(
                 f"以下资料：\n\n{ctx}{local_ctx}\n\n问题：{question}\n\n请生成完整研究报告。",
                 system=tpl_sys,
             )
-            status.update(label="✅ 报告生成完成", state="complete", expanded=False)
 
-        st.session_state.sources = sources
-        st.session_state.report  = report
+        st.session_state.sources      = sources
+        st.session_state.report       = report
         st.session_state.chat_history = []
-        st.session_state.validation = {}
-        st.session_state.phase   = "done"
+        st.session_state.validation   = {}
+        st.session_state.phase        = "done"
         st.rerun()
 
     elif st.session_state.phase == "done":
@@ -1230,13 +1215,9 @@ elif st.session_state.mode == "direct":
                 st.markdown(chat_input2)
             with st.chat_message("assistant", avatar="🤖"):
                 with st.spinner("思考中..."):
-                    history_ctx = "\n".join([
-                        f"{'用户' if m['role']=='user' else 'AI'}: {m['content']}"
-                        for m in st.session_state.chat_history[:-1]
-                    ])
-                    answer = ai_generate(
-                        f"研究主题：{question}\n\n研究报告：\n{st.session_state.report[:4000]}\n\n{'对话历史：\n' + history_ctx if history_ctx else ''}\n\n用户追问：{chat_input2}",
-                        system="你是一位专业研究助手，基于已有的研究报告和资料回答用户的追问。回答要简洁精准。"
+                    answer = chat_with_report(
+                        question, st.session_state.report,
+                        st.session_state.chat_history[:-1], chat_input2,
                     )
                 st.markdown(answer)
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
