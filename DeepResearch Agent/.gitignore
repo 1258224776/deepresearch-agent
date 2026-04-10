@@ -1,0 +1,19 @@
+# IDE
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+*.egg-info/
+
+# 环境变量（含密钥，不提交）
+.env
+
+# 系统
+.DS_Store
+Thumbs.db
