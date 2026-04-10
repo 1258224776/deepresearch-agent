@@ -39,8 +39,8 @@ USER_AGENTS = [
 # ──────────────────────────────────────────────
 _PROVIDERS = {
     "google":  {"env": "GOOGLE_API_KEY",  "model": "gemini-2.5-flash"},
-    "glm":     {"env": "GLM_API_KEY",     "model": "glm-4-flash",     "base_url": "https://open.bigmodel.cn/api/paas/v4/"},
-    "minimax": {"env": "MINIMAX_API_KEY", "model": "MiniMax-Text-01", "base_url": "https://api.minimax.chat/v1/"},
+    "glm":     {"env": "GLM_API_KEY",     "model": "glm-5",           "base_url": "https://open.bigmodel.cn/api/paas/v4/"},
+    "minimax": {"env": "MINIMAX_API_KEY", "model": "MiniMax-M2.7",  "base_url": "https://api.minimax.chat/v1/"},
     "openai":  {"env": "OPENAI_API_KEY",  "model": "gpt-4o-mini",     "base_url": "https://api.openai.com/v1/"},
 }
 
