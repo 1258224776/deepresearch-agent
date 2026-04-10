@@ -7,6 +7,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 from google import genai
+try:
+    from openai import OpenAI as _OAI
+except ImportError:
+    _OAI = None
 
 from config import PROVIDERS, FETCH_WORKERS, SEARCH_MAX_RESULTS, SEARCH_MAX_QUERIES, load_secret
 from prompts import (
@@ -51,7 +55,8 @@ def ai_generate(prompt: str, system: str = "") -> str:
                     model=cfg["model"], contents=prompt
                 ).text
             else:
-                from openai import OpenAI as _OAI
+                if _OAI is None:
+                    raise RuntimeError("openai 未安装，无法使用该提供商")
                 client = _OAI(api_key=api_key, base_url=cfg["base_url"])
                 messages = []
                 if system:
