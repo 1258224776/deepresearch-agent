@@ -4,7 +4,8 @@ config.py — 环境变量、API Key、全局常量
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# 始终加载 config.py 同目录下的 .env，不依赖运行时 cwd
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 # ── User-Agent 轮换池 ──
 USER_AGENTS = [
