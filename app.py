@@ -15,9 +15,8 @@ from main import (
     reason, web_search, fetch_page_content,
     summarize_source, compile_digest,
     ai_extract, fetch_page_full, deep_scrape,
-    save_scraped, save_report, client, SYSTEM_PROMPT,
+    save_scraped, save_report, ai_generate, SYSTEM_PROMPT,
 )
-from google.genai import types
 
 # ──────────────────────────────────────────────
 # 页面配置
@@ -463,17 +462,14 @@ elif st.session_state.mode == "scrape":
 
         elif st.session_state.phase == "gen_report":
             with st.spinner("📝 正在综合所有来源，生成完整报告..."):
-                chat = client.chats.create(
-                    model="gemini-2.5-flash",
-                    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
-                )
                 ctx = "\n\n".join([
                     f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
                     for i, s in enumerate(sources)
                 ])
-                report = chat.send_message(
-                    f"以下是搜集到的资料：\n\n{ctx}\n\n请针对以下问题生成完整研究报告：{question}"
-                ).text
+                report = ai_generate(
+                    f"以下是搜集到的资料：\n\n{ctx}\n\n请针对以下问题生成完整研究报告：{question}",
+                    system=SYSTEM_PROMPT,
+                )
             st.session_state.report = report
             st.session_state.phase  = "report_ready"
             st.rerun()
@@ -547,17 +543,14 @@ elif st.session_state.mode == "direct":
                                     "domain": domain, "raw_content": content})
 
             st.write(f"✅ 共收集 {len(sources)} 个来源，正在综合分析...")
-            chat = client.chats.create(
-                model="gemini-2.5-flash",
-                config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
-            )
             ctx = "\n\n".join([
                 f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
                 for i, s in enumerate(sources)
             ])
-            report = chat.send_message(
-                f"以下资料：\n\n{ctx}\n\n问题：{question}\n\n请生成完整研究报告。"
-            ).text
+            report = ai_generate(
+                f"以下资料：\n\n{ctx}\n\n问题：{question}\n\n请生成完整研究报告。",
+                system=SYSTEM_PROMPT,
+            )
 
             status.update(label="✅ 报告生成完成", state="complete", expanded=False)
 

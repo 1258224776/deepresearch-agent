@@ -20,8 +20,7 @@ import datetime
 from urllib.parse import urljoin, urlparse
 from dotenv import load_dotenv           # pip install python-dotenv
 load_dotenv()                            # 自动读取同目录下的 .env 文件
-from google import genai                 # pip install google-genai
-from google.genai import types
+from google import genai
 from ddgs import DDGS                   # pip install ddgs
 import httpx                            # pip install httpx
 import trafilatura                      # pip install trafilatura
@@ -36,19 +35,61 @@ USER_AGENTS = [
 ]
 
 # ──────────────────────────────────────────────
-# 1. 初始化 Gemini 客户端（AI Studio）
+# 1. 多 AI 提供商配置与自动切换
 # ──────────────────────────────────────────────
-def _get_api_key():
-    key = os.environ.get("GOOGLE_API_KEY", "")
-    if not key:
+_PROVIDERS = {
+    "google":  {"env": "GOOGLE_API_KEY",  "model": "gemini-2.5-flash"},
+    "glm":     {"env": "GLM_API_KEY",     "model": "glm-4-flash",     "base_url": "https://open.bigmodel.cn/api/paas/v4/"},
+    "minimax": {"env": "MINIMAX_API_KEY", "model": "MiniMax-Text-01", "base_url": "https://api.minimax.chat/v1/"},
+    "openai":  {"env": "OPENAI_API_KEY",  "model": "gpt-4o-mini",     "base_url": "https://api.openai.com/v1/"},
+}
+
+def _load_secret(key: str) -> str:
+    val = os.environ.get(key, "")
+    if not val:
         try:
             import streamlit as st
-            key = st.secrets.get("GOOGLE_API_KEY", "")
+            val = st.secrets.get(key, "") or ""
         except Exception:
             pass
-    return key
+    return val
 
-client = genai.Client(api_key=_get_api_key())
+def ai_generate(prompt: str, system: str = "") -> str:
+    """按优先级依次尝试各 AI 提供商，503/429 时自动切换到下一个。"""
+    order_str = _load_secret("AI_PROVIDER_ORDER") or "google,glm,minimax,openai"
+    order = [p.strip() for p in order_str.split(",")]
+    last_err = None
+    for name in order:
+        cfg = _PROVIDERS.get(name)
+        if not cfg:
+            continue
+        api_key = _load_secret(cfg["env"])
+        if not api_key:
+            continue
+        try:
+            if name == "google":
+                c = genai.Client(api_key=api_key)
+                return c.models.generate_content(
+                    model=cfg["model"], contents=prompt
+                ).text
+            else:
+                from openai import OpenAI as _OAI
+                c = _OAI(api_key=api_key, base_url=cfg["base_url"])
+                msgs = []
+                if system:
+                    msgs.append({"role": "system", "content": system})
+                msgs.append({"role": "user", "content": prompt})
+                return c.chat.completions.create(
+                    model=cfg["model"], messages=msgs
+                ).choices[0].message.content
+        except Exception as e:
+            s = str(e)
+            if any(x in s for x in ["503", "UNAVAILABLE", "429", "rate_limit", "overloaded", "Too Many", "quota"]):
+                print(f"[AI] {name} 暂时不可用，切换下一个提供商...")
+                last_err = e
+                continue
+            raise
+    raise RuntimeError(f"所有 AI 提供商均不可用。最后错误：{last_err}")
 
 # ──────────────────────────────────────────────
 # 2. 系统提示词
@@ -63,14 +104,6 @@ SYSTEM_PROMPT = """你是一个深度研究助手。
 
 请用中文回答，保持专业但易于理解的风格。
 如果搜索结果与问题无关，请直接说明并凭自身知识回答。"""
-
-# ──────────────────────────────────────────────
-# 3. 对话历史（由 chat 对象自动维护）
-# ──────────────────────────────────────────────
-chat = client.chats.create(
-    model="gemini-2.5-flash",
-    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
-)
 
 last_question = ""
 last_reply = ""
@@ -257,9 +290,7 @@ def extract_key_points(content: str, question: str) -> str:
     prompt = f"""从以下网页内容中，提取与"{question}"最相关的 4-6 个关键信息点。
 要求：每条以 "• " 开头，一句话，包含具体数据或观点；去掉广告/导航噪音；只返回要点列表。
 网页内容：\n{content[:4000]}"""
-    return client.models.generate_content(
-        model="gemini-2.5-flash", contents=prompt
-    ).text
+    return ai_generate(prompt)
 
 
 def summarize_source(content: str, question: str, title: str) -> dict:
@@ -282,9 +313,7 @@ def summarize_source(content: str, question: str, title: str) -> dict:
 只返回 JSON，不要其他内容。"""
 
     try:
-        text = client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt
-        ).text.strip()
+        text = ai_generate(prompt).strip()
         if "```" in text:
             text = re.split(r"```(?:json)?", text)[1].strip().rstrip("`").strip()
         return json.loads(text)
@@ -316,9 +345,7 @@ def compile_digest(sources: list, question: str) -> str:
 - 客观陈述，有具体数据支撑
 - 用中文，专业流畅"""
 
-    return client.models.generate_content(
-        model="gemini-2.5-flash", contents=prompt
-    ).text
+    return ai_generate(prompt)
 
 
 def ai_extract(content: str, instruction: str) -> str:
@@ -336,11 +363,7 @@ def ai_extract(content: str, instruction: str) -> str:
 网页内容：
 {content[:8000]}"""  # 限制输入长度
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-    return response.text
+    return ai_generate(prompt)
 
 
 # ══════════════════════════════════════════════
@@ -378,13 +401,8 @@ def reason(question: str) -> dict:
 
 只返回 JSON，不要返回任何其他内容。"""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
-
     try:
-        text = response.text.strip()
+        text = ai_generate(prompt).strip()
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -421,12 +439,8 @@ def generate_sub_queries(question: str) -> list[str]:
 
 研究问题：{question}"""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt
-    )
     try:
-        text = response.text.strip()
+        text = ai_generate(prompt).strip()
         if "```" in text:
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -498,16 +512,11 @@ def ask(user_input: str) -> str:
 
     # ── 第二步：根据推理结果决定行动 ──
     if not plan.get("need_search"):
-        # 不需要搜索，直接用 AI 知识回答
         direct_answer = plan.get("answer_direct", "")
         if direct_answer:
-            # 推理阶段已经给出了回答，直接存入对话历史并返回
-            conversation_msg = f"用户问题：{user_input}\n\n回答：{direct_answer}"
-            chat.send_message(conversation_msg)
             return direct_answer
         else:
-            # 让 chat 正常回答
-            return chat.send_message(user_input).text
+            return ai_generate(user_input, system=SYSTEM_PROMPT)
 
     # 需要搜索：用推理出的关键词替换自动生成的关键词
     print("  🔍 开始多角度搜索...\n")
@@ -543,8 +552,7 @@ def ask(user_input: str) -> str:
     # ── 第三步：综合分析 ──
     print("\n  📝 资料收集完毕，正在深度分析...")
     full_message = f"{search_text}\n\n用户的问题：{user_input}"
-    response = chat.send_message(full_message)
-    return response.text
+    return ai_generate(full_message, system=SYSTEM_PROMPT)
 
 
 # ──────────────────────────────────────────────
