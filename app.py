@@ -455,11 +455,24 @@ div[data-testid="stButton"] > button[kind="secondary"]:hover {
 
 /* ── 输入框 ── */
 div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {
-    background: rgba(255,255,255,0.04) !important;
-    border: 1px solid rgba(255,255,255,0.10) !important;
+    background: #0f1729 !important;
+    border: 1px solid rgba(99,102,241,0.25) !important;
     border-radius: 10px !important;
+    color: #cbd5e1 !important;
+    font-size: 0.94rem !important;
+    font-weight: 500 !important;
+    caret-color: #818cf8 !important;
+}
+div[data-testid="stTextInput"] input:focus,
+div[data-testid="stTextArea"] textarea:focus {
+    border-color: rgba(99,102,241,0.55) !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.12) !important;
     color: #e2e8f0 !important;
-    font-size: 0.92rem !important;
+}
+div[data-testid="stTextInput"] input::placeholder,
+div[data-testid="stTextArea"] textarea::placeholder {
+    color: #334155 !important;
+    opacity: 1 !important;
 }
 div[data-testid="stTextInput"] input:focus, div[data-testid="stTextArea"] textarea:focus {
     border-color: rgba(99,102,241,0.50) !important;
