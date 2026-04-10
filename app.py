@@ -39,6 +39,39 @@ st.markdown("""
     box-sizing: border-box;
 }
 
+/* ══════════════════════════════
+   动效 Keyframes
+══════════════════════════════ */
+@keyframes fadeUp {
+    from { opacity: 0; transform: translateY(22px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+@keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50%       { transform: translateY(-6px); }
+}
+@keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 8px rgba(99,102,241,0.4); }
+    50%       { box-shadow: 0 0 20px rgba(99,102,241,0.8), 0 0 40px rgba(99,102,241,0.3); }
+}
+@keyframes shimmer {
+    0%   { background-position: -200% center; }
+    100% { background-position:  200% center; }
+}
+@keyframes scanline {
+    0%   { transform: translateY(-100%); }
+    100% { transform: translateY(100vh); }
+}
+@keyframes borderFlow {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
 /* ── 背景 ── */
 .stApp {
     background: #03060f;
@@ -47,6 +80,7 @@ st.markdown("""
         radial-gradient(ellipse 55% 40% at 80% 85%, rgba(59,130,246,0.08) 0%, transparent 55%),
         radial-gradient(ellipse 40% 30% at 60% 45%, rgba(139,92,246,0.05) 0%, transparent 50%);
     min-height: 100vh;
+    animation: fadeIn 0.5s ease;
 }
 
 /* ── 隐藏 Streamlit 默认元素 ── */
@@ -59,6 +93,7 @@ st.markdown("""
 .hero-wrap {
     text-align: center;
     padding: 60px 20px 50px;
+    animation: fadeUp 0.7s ease both;
 }
 .hero-badge {
     display: inline-flex;
@@ -74,6 +109,7 @@ st.markdown("""
     letter-spacing: 0.08em;
     text-transform: uppercase;
     margin-bottom: 24px;
+    animation: pulseGlow 3s ease-in-out infinite;
 }
 .hero-title {
     font-size: clamp(2rem, 5vw, 3.2rem);
@@ -82,6 +118,7 @@ st.markdown("""
     line-height: 1.15;
     color: #f8fafc;
     margin-bottom: 18px;
+    animation: fadeUp 0.8s ease 0.1s both;
 }
 .hero-title .accent {
     background: linear-gradient(135deg, #818cf8 0%, #60a5fa 50%, #a78bfa 100%);
@@ -110,14 +147,15 @@ st.markdown("""
     padding: 36px 30px 28px;
     position: relative;
     overflow: hidden;
-    transition: border-color 0.25s, transform 0.25s, box-shadow 0.25s;
+    transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
     text-align: left;
     cursor: default;
+    animation: fadeUp 0.6s ease both;
 }
 .mode-card:hover {
-    border-color: rgba(99,102,241,0.45);
-    transform: translateY(-3px);
-    box-shadow: 0 20px 60px rgba(99,102,241,0.12);
+    border-color: rgba(99,102,241,0.55);
+    transform: translateY(-5px);
+    box-shadow: 0 24px 64px rgba(99,102,241,0.16);
 }
 .mode-card::before {
     content: '';
@@ -142,6 +180,7 @@ st.markdown("""
     display: flex; align-items: center; justify-content: center;
     font-size: 1.5rem;
     margin-bottom: 20px;
+    animation: float 4s ease-in-out infinite;
 }
 .mode-title { font-size: 1.05rem; font-weight: 700; color: #f1f5f9; margin-bottom: 10px; }
 .mode-desc  { font-size: 0.87rem; color: #64748b; line-height: 1.7; margin-bottom: 18px; }
@@ -268,12 +307,13 @@ st.markdown("""
     border-radius: 16px;
     padding: 22px;
     margin-bottom: 16px;
-    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
+    animation: fadeUp 0.5s ease both;
 }
 .src-card:hover {
-    border-color: rgba(99,102,241,0.30);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-    transform: translateY(-1px);
+    border-color: rgba(99,102,241,0.35);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+    transform: translateY(-3px);
 }
 .src-header {
     display: flex;
@@ -445,6 +485,28 @@ section[data-testid="stSidebar"] {
     font-weight: 500;
 }
 
+/* ── 返回按钮 ── */
+.back-btn-wrap div[data-testid="stButton"] > button {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.10) !important;
+    color: #64748b !important;
+    font-size: 0.82rem !important;
+    padding: 6px 14px !important;
+    border-radius: 8px !important;
+    width: auto !important;
+}
+.back-btn-wrap div[data-testid="stButton"] > button:hover {
+    background: rgba(99,102,241,0.10) !important;
+    border-color: rgba(99,102,241,0.30) !important;
+    color: #a5b4fc !important;
+}
+
+/* ── 顶栏进入动效 ── */
+.topbar { animation: fadeIn 0.4s ease; }
+.digest-card { animation: fadeUp 0.6s ease both; }
+.report-wrap { animation: fadeUp 0.5s ease both; }
+.stat-bar    { animation: fadeUp 0.4s ease 0.1s both; }
+
 /* ── divider ── */
 hr { border-color: rgba(255,255,255,0.06) !important; }
 
@@ -611,12 +673,18 @@ if st.session_state.mode == "home":
 elif st.session_state.mode == "scrape":
 
     # 顶栏
-    st.markdown("""
-<div class="topbar">
-  <div class="topbar-logo"><span class="dot"></span> DeepResearch</div>
-  <div class="topbar-crumb">首页 › <span class="current">🔍 搜索 & 爬取</span></div>
-</div>
-""", unsafe_allow_html=True)
+    nav_l, nav_m, nav_r = st.columns([1, 4, 1])
+    with nav_l:
+        st.markdown('<div class="back-btn-wrap">', unsafe_allow_html=True)
+        if st.button("← 返回首页", key="back_scrape"):
+            go_home(); st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    with nav_m:
+        st.markdown("""
+<div style="text-align:center;padding:8px 0">
+  <span style="font-size:0.82rem;color:#475569">首页 › <span style="color:#818cf8;font-weight:600">🔍 搜索 & 爬取</span></span>
+</div>""", unsafe_allow_html=True)
+    st.markdown('<div style="border-bottom:1px solid rgba(255,255,255,0.05);margin-bottom:28px"></div>', unsafe_allow_html=True)
 
     # ── 输入 ──
     if st.session_state.phase == "input":
@@ -628,7 +696,7 @@ elif st.session_state.mode == "scrape":
 """, unsafe_allow_html=True)
 
         with st.form("scrape_form"):
-            q = st.text_input("", placeholder="例如：特斯拉 2025 年最新车型发布信息", label_visibility="collapsed")
+            q = st.text_input("搜索内容", placeholder="例如：特斯拉 2025 年最新车型发布信息", label_visibility="collapsed")
             if st.form_submit_button("🔍 开始搜索爬取", use_container_width=True, type="primary"):
                 if q.strip():
                     st.session_state.question = q.strip()
@@ -809,12 +877,19 @@ elif st.session_state.mode == "scrape":
 # ══════════════════════════════════════════════
 elif st.session_state.mode == "direct":
 
-    st.markdown("""
-<div class="topbar">
-  <div class="topbar-logo"><span class="dot"></span> DeepResearch</div>
-  <div class="topbar-crumb">首页 › <span class="current">📝 生成研究报告</span></div>
-</div>
-""", unsafe_allow_html=True)
+    # 顶栏
+    nav_l2, nav_m2, nav_r2 = st.columns([1, 4, 1])
+    with nav_l2:
+        st.markdown('<div class="back-btn-wrap">', unsafe_allow_html=True)
+        if st.button("← 返回首页", key="back_direct"):
+            go_home(); st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    with nav_m2:
+        st.markdown("""
+<div style="text-align:center;padding:8px 0">
+  <span style="font-size:0.82rem;color:#475569">首页 › <span style="color:#818cf8;font-weight:600">📝 生成研究报告</span></span>
+</div>""", unsafe_allow_html=True)
+    st.markdown('<div style="border-bottom:1px solid rgba(255,255,255,0.05);margin-bottom:28px"></div>', unsafe_allow_html=True)
 
     if st.session_state.phase == "input":
         st.markdown("""
@@ -825,7 +900,7 @@ elif st.session_state.mode == "direct":
 """, unsafe_allow_html=True)
 
         with st.form("direct_form"):
-            q = st.text_input("", placeholder="例如：2025 年 AI 大模型行业竞争格局分析", label_visibility="collapsed")
+            q = st.text_input("研究问题", placeholder="例如：2025 年 AI 大模型行业竞争格局分析", label_visibility="collapsed")
             if st.form_submit_button("📝 生成研究报告", use_container_width=True, type="primary"):
                 if q.strip():
                     st.session_state.question = q.strip()
