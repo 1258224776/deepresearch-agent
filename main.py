@@ -68,7 +68,7 @@ SYSTEM_PROMPT = """你是一个深度研究助手。
 # 3. 对话历史（由 chat 对象自动维护）
 # ──────────────────────────────────────────────
 chat = client.chats.create(
-    model="gemini-2.0-flash-lite",
+    model="gemini-2.5-flash-preview-04-17",
     config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
 )
 
@@ -258,7 +258,7 @@ def extract_key_points(content: str, question: str) -> str:
 要求：每条以 "• " 开头，一句话，包含具体数据或观点；去掉广告/导航噪音；只返回要点列表。
 网页内容：\n{content[:4000]}"""
     return client.models.generate_content(
-        model="gemini-2.0-flash-lite", contents=prompt
+        model="gemini-2.5-flash-preview-04-17", contents=prompt
     ).text
 
 
@@ -283,7 +283,7 @@ def summarize_source(content: str, question: str, title: str) -> dict:
 
     try:
         text = client.models.generate_content(
-            model="gemini-2.0-flash-lite", contents=prompt
+            model="gemini-2.5-flash-preview-04-17", contents=prompt
         ).text.strip()
         if "```" in text:
             text = re.split(r"```(?:json)?", text)[1].strip().rstrip("`").strip()
@@ -317,7 +317,7 @@ def compile_digest(sources: list, question: str) -> str:
 - 用中文，专业流畅"""
 
     return client.models.generate_content(
-        model="gemini-2.0-flash-lite", contents=prompt
+        model="gemini-2.5-flash-preview-04-17", contents=prompt
     ).text
 
 
@@ -337,7 +337,7 @@ def ai_extract(content: str, instruction: str) -> str:
 {content[:8000]}"""  # 限制输入长度
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-lite",
+        model="gemini-2.5-flash-preview-04-17",
         contents=prompt
     )
     return response.text
@@ -379,7 +379,7 @@ def reason(question: str) -> dict:
 只返回 JSON，不要返回任何其他内容。"""
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-lite",
+        model="gemini-2.5-flash-preview-04-17",
         contents=prompt
     )
 
@@ -422,7 +422,7 @@ def generate_sub_queries(question: str) -> list[str]:
 研究问题：{question}"""
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-lite",
+        model="gemini-2.5-flash-preview-04-17",
         contents=prompt
     )
     try:
