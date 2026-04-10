@@ -1,5 +1,6 @@
 """
-DeepResearch Agent — 网页前端 v2
+DeepResearch Agent — v3
+两大功能：① 搜索爬取内容  ② 直接生成研究报告
 运行方式：streamlit run app.py
 """
 
@@ -9,22 +10,13 @@ import streamlit as st
 from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(__file__))
-
 from dotenv import load_dotenv
 load_dotenv()
 
 from main import (
-    reason,
-    web_search,
-    fetch_page_content,
-    extract_key_points,
-    ai_extract,
-    fetch_page_full,
-    deep_scrape,
-    save_scraped,
-    save_report,
-    client,
-    SYSTEM_PROMPT,
+    reason, web_search, fetch_page_content, extract_key_points,
+    ai_extract, fetch_page_full, deep_scrape,
+    save_scraped, save_report, client, SYSTEM_PROMPT,
 )
 from google.genai import types
 
@@ -35,367 +27,443 @@ st.set_page_config(
     page_title="DeepResearch Agent",
     page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ──────────────────────────────────────────────
-# 自定义样式
+# 样式
 # ──────────────────────────────────────────────
 st.markdown("""
 <style>
-.stApp { background-color: #0f1117; }
+.stApp { background-color: #0d1117; }
 
-.phase-banner {
-    background: linear-gradient(135deg, #1a1f2e 0%, #1e2d45 100%);
-    border: 1px solid #2d3748;
-    border-radius: 10px;
-    padding: 20px 24px;
-    margin-bottom: 20px;
+/* 首页模式选择卡片 */
+.mode-card {
+    background: #161b22;
+    border: 1.5px solid #30363d;
+    border-radius: 14px;
+    padding: 32px 28px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    height: 100%;
 }
-.phase-banner h2 { color: #e2e8f0; margin: 0 0 4px 0; font-size: 1.2rem; }
-.phase-banner p  { color: #718096; margin: 0; font-size: 0.85rem; }
+.mode-card:hover { border-color: #58a6ff; box-shadow: 0 0 0 3px rgba(88,166,255,0.15); }
+.mode-icon  { font-size: 2.4rem; margin-bottom: 14px; }
+.mode-title { font-size: 1.2rem; font-weight: 700; color: #e6edf3; margin-bottom: 8px; }
+.mode-desc  { font-size: 0.88rem; color: #8b949e; line-height: 1.6; }
+.mode-steps { margin-top: 14px; font-size: 0.8rem; color: #58a6ff; }
 
-.source-card {
-    background: #1a1f2e;
-    border: 1px solid #2d3748;
-    border-radius: 10px;
-    padding: 16px 18px;
-    margin-bottom: 14px;
-    transition: border-color 0.2s;
-}
-.source-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #e2e8f0;
-    margin-bottom: 6px;
-    line-height: 1.4;
-}
-.source-domain {
-    display: inline-block;
-    background: #1e3a5f;
-    color: #63b3ed;
-    border-radius: 20px;
-    padding: 2px 10px;
-    font-size: 0.72rem;
-    margin-bottom: 10px;
-}
-.source-points {
-    color: #a0aec0;
-    font-size: 0.85rem;
-    line-height: 1.7;
-    white-space: pre-wrap;
-}
-.source-link {
-    color: #4f8ef7;
-    font-size: 0.78rem;
-    text-decoration: none;
-}
-
-.reason-box {
-    background: #1a1f2e;
-    border-left: 3px solid #4f8ef7;
+/* 面包屑导航 */
+.breadcrumb {
+    font-size: 0.82rem; color: #8b949e;
+    margin-bottom: 18px;
+    padding: 8px 14px;
+    background: #161b22;
     border-radius: 6px;
-    padding: 12px 16px;
-    margin: 8px 0;
-    font-size: 0.88rem;
-    color: #a0aec0;
+    display: inline-block;
+}
+.breadcrumb span { color: #58a6ff; }
+
+/* 来源卡片 */
+.src-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+}
+.src-num    { display:inline-block; background:#1f3a5c; color:#58a6ff; border-radius:50%; width:22px; height:22px; text-align:center; line-height:22px; font-size:0.75rem; font-weight:700; margin-right:8px; }
+.src-title  { font-size:0.95rem; font-weight:600; color:#e6edf3; }
+.src-domain { display:inline-block; background:#1a2636; color:#58a6ff; border-radius:20px; padding:2px 10px; font-size:0.72rem; margin: 8px 0 10px 0; }
+.src-points { color:#8b949e; font-size:0.85rem; line-height:1.75; white-space:pre-wrap; }
+
+/* 报告区 */
+.report-wrap {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin-top: 6px;
 }
 
-.report-box {
-    background: #141920;
-    border: 1px solid #2d3748;
-    border-radius: 10px;
-    padding: 24px 28px;
-    margin-top: 10px;
+/* 进度标签 */
+.tag-blue {
+    display:inline-block; background:#1f3a5c; color:#58a6ff;
+    border-radius:4px; padding:2px 9px; font-size:0.75rem; margin-right:6px;
 }
 
 .file-item {
-    background: #1a1f2e;
-    border-radius: 5px;
-    padding: 6px 10px;
-    margin: 4px 0;
-    font-size: 0.82rem;
-    color: #a0aec0;
-}
-
-div[data-testid="stButton"] button[kind="primary"] {
-    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-    border: none;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    background:#161b22; border-radius:5px;
+    padding:6px 10px; margin:4px 0;
+    font-size:0.81rem; color:#8b949e;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ──────────────────────────────────────────────
-# Session State 初始化
+# Session State
 # ──────────────────────────────────────────────
 _defaults = {
-    "phase": "idle",          # idle | searching | sources_ready | generating | report_ready
-    "sources": [],            # list of {title, url, domain, key_points, raw_content}
-    "question": "",
-    "report": "",
-    "reasoning_log": [],
-    "search_queries": [],
+    "mode":    "home",      # home | scrape | direct
+    "phase":   "input",     # input | searching | sources_ready | gen_report | report_ready | generating | done
+    "question":     "",
+    "sources":      [],
+    "reasoning_log":[],
+    "report":       "",
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
 os.makedirs("reports", exist_ok=True)
-os.makedirs("scraped", exist_ok=True)
+os.makedirs("scraped",  exist_ok=True)
+
+def go_home():
+    for k, v in _defaults.items():
+        st.session_state[k] = v
 
 # ──────────────────────────────────────────────
-# 侧边栏
+# 侧边栏（已保存文件 + 手动爬取）
 # ──────────────────────────────────────────────
 with st.sidebar:
-    st.title("🔬 DeepResearch")
-    st.caption("AI 规划 · 多源爬取 · 智能摘要")
+    st.markdown("### 🔬 DeepResearch")
+    if st.button("← 回到首页", use_container_width=True):
+        go_home(); st.rerun()
     st.divider()
 
-    # ── 手动爬取工具 ──
-    st.subheader("🕷️ 手动爬取网页")
-    scrape_url = st.text_input("网址", placeholder="https://example.com")
-    scrape_instruction = st.text_input("提取内容（可选）", placeholder="提取所有职位和薪资")
-    deep_mode = st.checkbox("深度爬取（自动跟进子页面）")
-
+    st.subheader("🕷️ 手动爬取")
+    s_url  = st.text_input("网址", placeholder="https://example.com")
+    s_inst = st.text_input("提取内容（可选）", placeholder="提取所有职位和薪资")
+    s_deep = st.checkbox("深度爬取（跟进子页面）")
     if st.button("开始爬取", use_container_width=True):
-        if not scrape_url:
+        if not s_url:
             st.warning("请输入网址")
         else:
             with st.spinner("爬取中..."):
-                if deep_mode:
-                    content = deep_scrape(scrape_url, max_pages=5)
-                else:
-                    content, _ = fetch_page_full(scrape_url)
+                content = deep_scrape(s_url, 5) if s_deep else fetch_page_full(s_url)[0]
             if content and not content.startswith("（"):
-                extracted = ""
-                if scrape_instruction:
-                    with st.spinner("AI 提取中..."):
-                        extracted = ai_extract(content, scrape_instruction)
-                filepath = save_scraped(scrape_url, content, extracted)
-                st.success(f"已保存: {filepath}")
+                extracted = ai_extract(content, s_inst) if s_inst else ""
+                fp = save_scraped(s_url, content, extracted)
+                st.success(f"已保存: {fp}")
                 if extracted:
-                    st.markdown("**AI 提取结果：**")
                     st.markdown(extracted)
             else:
-                st.error(f"爬取失败: {content}")
+                st.error(f"失败: {content}")
 
     st.divider()
-
-    # ── 已保存文件 ──
     st.subheader("📁 已保存文件")
-    report_files = sorted(
-        [f for f in os.listdir("reports") if f.endswith(".md")], reverse=True
-    )[:5]
-    if report_files:
-        st.caption("研究报告（最近5条）")
-        for f in report_files:
+    rfiles = sorted([f for f in os.listdir("reports") if f.endswith(".md")], reverse=True)[:5]
+    if rfiles:
+        st.caption("报告")
+        for f in rfiles:
             st.markdown(f'<div class="file-item">📄 {f}</div>', unsafe_allow_html=True)
-    else:
-        st.caption("暂无报告")
-
-    scraped_files = sorted(
-        [f for f in os.listdir("scraped") if f.endswith(".md")], reverse=True
-    )[:5]
-    if scraped_files:
-        st.caption("爬取记录（最近5条）")
-        for f in scraped_files:
+    sfiles = sorted([f for f in os.listdir("scraped") if f.endswith(".md")], reverse=True)[:5]
+    if sfiles:
+        st.caption("爬取记录")
+        for f in sfiles:
             st.markdown(f'<div class="file-item">🕷️ {f}</div>', unsafe_allow_html=True)
 
-    st.divider()
-
-    if st.button("🔄 重置 / 新研究", use_container_width=True):
-        for k, v in _defaults.items():
-            st.session_state[k] = v
-        st.rerun()
-
 
 # ══════════════════════════════════════════════
-# 主区域
+# 首页：模式选择
 # ══════════════════════════════════════════════
-st.title("深度研究助手")
+if st.session_state.mode == "home":
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("## 🔬 DeepResearch Agent")
+    st.markdown("<p style='color:#8b949e;margin-bottom:32px'>选择你想要做的事情</p>", unsafe_allow_html=True)
 
-# ──────────────────────────────────────────────
-# Phase: idle — 输入研究问题
-# ──────────────────────────────────────────────
-if st.session_state.phase == "idle":
-    st.caption("输入研究问题，AI 会自动规划搜索策略、抓取多个来源、提炼关键信息，再由你决定是否生成完整报告。")
-    st.markdown("")
+    col1, col2 = st.columns(2, gap="large")
 
-    with st.form("research_form", clear_on_submit=False):
-        question = st.text_input(
-            "研究问题",
-            placeholder="例如：2025年大模型市场格局分析",
-            label_visibility="collapsed",
-        )
-        submitted = st.form_submit_button("🔍 开始研究", use_container_width=True, type="primary")
+    with col1:
+        st.markdown("""
+<div class="mode-card">
+  <div class="mode-icon">🔍</div>
+  <div class="mode-title">搜索 & 爬取内容</div>
+  <div class="mode-desc">输入你想了解的内容，AI 自动规划搜索策略，从多个网页抓取并提炼关键信息展示给你。</div>
+  <div class="mode-steps">① 输入主题 → ② AI 搜索爬取 → ③ 查看内容摘要 → ④ 可选生成报告</div>
+</div>
+""", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("进入搜索爬取 →", use_container_width=True, key="btn_scrape"):
+            st.session_state.mode  = "scrape"
+            st.session_state.phase = "input"
+            st.rerun()
 
-    if submitted:
-        if not question.strip():
-            st.warning("请输入研究问题")
-        else:
-            st.session_state.question = question.strip()
-            st.session_state.phase = "searching"
+    with col2:
+        st.markdown("""
+<div class="mode-card">
+  <div class="mode-icon">📝</div>
+  <div class="mode-title">直接生成研究报告</div>
+  <div class="mode-desc">输入研究问题，AI 搜索、综合多方资料，直接输出一份完整、有条理的深度研究报告。</div>
+  <div class="mode-steps">① 输入问题 → ② AI 搜索分析 → ③ 输出完整报告 → ④ 可保存</div>
+</div>
+""", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("进入报告生成 →", use_container_width=True, key="btn_report"):
+            st.session_state.mode  = "direct"
+            st.session_state.phase = "input"
             st.rerun()
 
 
-# ──────────────────────────────────────────────
-# Phase: searching — 实时爬取进度
-# ──────────────────────────────────────────────
-elif st.session_state.phase == "searching":
-    question = st.session_state.question
-    st.markdown(f'<div class="phase-banner"><h2>🔍 正在研究：{question}</h2><p>AI 正在规划策略、搜索并提取关键信息...</p></div>', unsafe_allow_html=True)
+# ══════════════════════════════════════════════
+# 模式一：搜索爬取内容
+# ══════════════════════════════════════════════
+elif st.session_state.mode == "scrape":
 
-    with st.status("深度研究进行中...", expanded=True) as status:
+    # 面包屑
+    st.markdown('<div class="breadcrumb">首页 › <span>🔍 搜索 & 爬取内容</span></div>', unsafe_allow_html=True)
 
-        # Step 1: 推理
-        st.write("🧠 分析问题，制定搜索策略...")
-        plan = reason(question)
-        queries     = plan.get("search_queries") or [question]
-        reasoning   = plan.get("reasoning", "")
-        q_type      = plan.get("question_type", "深度研究")
+    # ── 输入阶段 ──
+    if st.session_state.phase == "input":
+        st.markdown("### 你想搜索什么内容？")
+        st.caption("描述你想了解的主题或问题，AI 会自动找到相关网页并提炼关键内容。")
+        st.markdown("")
 
-        st.write(f"📋 策略：从 **{len(queries)}** 个角度搜索（{q_type}）")
+        with st.form("scrape_form"):
+            q = st.text_input("搜索主题", placeholder="例如：特斯拉 2025 年最新车型发布信息",
+                              label_visibility="collapsed")
+            if st.form_submit_button("🔍 开始搜索爬取", use_container_width=True, type="primary"):
+                if q.strip():
+                    st.session_state.question = q.strip()
+                    st.session_state.phase = "searching"
+                    st.rerun()
+                else:
+                    st.warning("请输入内容")
 
-        reasoning_log = [
-            f"**问题类型：** {q_type}",
-            f"**分析思路：** {reasoning}",
-            f"**搜索角度：** {' / '.join(queries)}",
-        ]
+    # ── 搜索爬取阶段 ──
+    elif st.session_state.phase == "searching":
+        question = st.session_state.question
+        st.markdown(f"### 🔍 正在搜索：{question}")
 
-        # Step 2: 搜索 + 抓取 + 提炼
-        sources = []
-        seen_urls = set()
+        with st.status("搜索爬取进行中...", expanded=True) as status:
+            st.write("🧠 分析主题，规划搜索角度...")
+            plan    = reason(question)
+            queries = plan.get("search_queries") or [question]
+            q_type  = plan.get("question_type", "深度研究")
+            reasoning = plan.get("reasoning", "")
 
-        for i, query in enumerate(queries, 1):
-            st.write(f"🔎 搜索 [{i}/{len(queries)}]：{query}")
-            results = web_search(query, max_results=3)
+            st.write(f"📋 将从 **{len(queries)}** 个角度搜索")
 
-            for r in results:
-                url = r.get("href", "")
-                if not url or url in seen_urls:
-                    continue
-                seen_urls.add(url)
+            log = [
+                f"**分析：** {reasoning}",
+                f"**搜索角度：** {' · '.join(queries)}",
+            ]
 
-                title  = r.get("title", "无标题")
-                domain = urlparse(url).netloc
+            sources, seen = [], set()
+            for i, query in enumerate(queries, 1):
+                st.write(f"🔎 [{i}/{len(queries)}] 搜索「{query}」...")
+                for r in web_search(query, max_results=3):
+                    url = r.get("href", "")
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    title  = r.get("title", "无标题")
+                    domain = urlparse(url).netloc
+                    st.write(f"   📄 {title[:50]}...")
+                    content = fetch_page_content(url, max_chars=3000)
+                    if content.startswith("（"):
+                        continue
+                    kp = extract_key_points(content, question)
+                    sources.append({"title": title, "url": url, "domain": domain,
+                                    "key_points": kp, "raw_content": content})
 
-                st.write(f"   📄 处理：{title[:45]}...")
-                content = fetch_page_content(url, max_chars=3000)
+            status.update(label=f"✅ 完成，共收集 {len(sources)} 个来源", state="complete", expanded=False)
 
-                if content.startswith("（"):
-                    continue
+        st.session_state.sources       = sources
+        st.session_state.reasoning_log = log
+        st.session_state.phase         = "sources_ready"
+        st.rerun()
 
-                key_points = extract_key_points(content, question)
+    # ── 展示爬取内容 ──
+    elif st.session_state.phase in ("sources_ready", "gen_report", "report_ready"):
+        question = st.session_state.question
+        sources  = st.session_state.sources
 
-                sources.append({
-                    "title":       title,
-                    "url":         url,
-                    "domain":      domain,
-                    "key_points":  key_points,
-                    "raw_content": content,
-                })
+        st.markdown(f"### 📄 搜索结果：{question}")
 
-        status.update(
-            label=f"✅ 完成！共收集 {len(sources)} 个信息源",
-            state="complete",
-            expanded=False,
-        )
+        with st.expander("🧠 AI 分析思路", expanded=False):
+            for line in st.session_state.reasoning_log:
+                st.markdown(f'<div class="file-item" style="padding:10px 14px">{line}</div>', unsafe_allow_html=True)
 
-    st.session_state.sources       = sources
-    st.session_state.reasoning_log = reasoning_log
-    st.session_state.search_queries = queries
-    st.session_state.phase         = "sources_ready"
-    st.rerun()
+        st.markdown(f"**共找到 {len(sources)} 个来源**，以下是提炼后的关键内容：")
+        st.markdown("")
 
-
-# ──────────────────────────────────────────────
-# Phase: sources_ready / generating / report_ready
-# ──────────────────────────────────────────────
-elif st.session_state.phase in ("sources_ready", "generating", "report_ready"):
-    question = st.session_state.question
-    sources  = st.session_state.sources
-
-    # ── 顶部：问题 + 推理折叠 ──
-    st.markdown(f'<div class="phase-banner"><h2>🔎 {question}</h2><p>来自 {len(sources)} 个信息源的研究摘要</p></div>', unsafe_allow_html=True)
-
-    with st.expander("🧠 查看 AI 分析思路", expanded=False):
-        for line in st.session_state.reasoning_log:
-            st.markdown(f'<div class="reason-box">{line}</div>', unsafe_allow_html=True)
-
-    # ── 信息源卡片 ──
-    st.subheader(f"📚 信息来源（{len(sources)} 个）")
-
-    if not sources:
-        st.warning("未能找到有效信息源，请尝试更换问题描述。")
-    else:
-        cols = st.columns(2, gap="medium")
-        for i, src in enumerate(sources):
-            with cols[i % 2]:
-                st.markdown(f"""
-<div class="source-card">
-  <div class="source-domain">🌐 {src['domain']}</div>
-  <div class="source-title">{src['title']}</div>
-  <div class="source-points">{src['key_points']}</div>
+        if not sources:
+            st.warning("未找到有效内容，请尝试更换描述方式。")
+        else:
+            cols = st.columns(2, gap="medium")
+            for i, src in enumerate(sources):
+                with cols[i % 2]:
+                    st.markdown(f"""
+<div class="src-card">
+  <div><span class="src-num">{i+1}</span><span class="src-title">{src['title']}</span></div>
+  <div class="src-domain">🌐 {src['domain']}</div>
+  <div class="src-points">{src['key_points']}</div>
 </div>
 """, unsafe_allow_html=True)
-                with st.expander(f"查看原文片段 · {src['domain']}"):
-                    st.markdown(f"[🔗 访问原网页]({src['url']})")
-                    st.text(src["raw_content"][:600] + "…")
+                    with st.expander(f"原文片段 & 链接"):
+                        st.markdown(f"[🔗 访问原页面]({src['url']})")
+                        st.caption(src["raw_content"][:500] + "…")
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ── 操作区 ──
-    if st.session_state.phase == "sources_ready":
-        st.subheader("下一步")
-        col_yes, col_no = st.columns([2, 1], gap="small")
-        with col_yes:
-            if st.button("📝 生成完整研究报告", type="primary", use_container_width=True):
-                st.session_state.phase = "generating"
-                st.rerun()
-        with col_no:
-            if st.button("✕ 不需要，重新研究", use_container_width=True):
-                for k, v in _defaults.items():
-                    st.session_state[k] = v
-                st.rerun()
+        # 操作区
+        if st.session_state.phase == "sources_ready":
+            st.markdown("#### 下一步")
+            c1, c2, c3 = st.columns([2, 2, 1])
+            with c1:
+                if st.button("📝 基于以上内容生成研究报告", type="primary", use_container_width=True):
+                    st.session_state.phase = "gen_report"
+                    st.rerun()
+            with c2:
+                if st.button("🔍 重新搜索其他内容", use_container_width=True):
+                    st.session_state.phase = "input"
+                    st.session_state.sources = []
+                    st.rerun()
+            with c3:
+                if st.button("🏠 首页", use_container_width=True):
+                    go_home(); st.rerun()
 
+        elif st.session_state.phase == "gen_report":
+            with st.spinner("📝 正在综合所有来源，生成报告..."):
+                chat = client.chats.create(
+                    model="gemini-3.1-pro-preview",
+                    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
+                )
+                ctx = "\n\n".join([
+                    f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
+                    for i, s in enumerate(sources)
+                ])
+                report = chat.send_message(
+                    f"以下是搜集到的资料：\n\n{ctx}\n\n请针对以下问题生成完整的研究报告：{question}"
+                ).text
+            st.session_state.report = report
+            st.session_state.phase  = "report_ready"
+            st.rerun()
+
+        elif st.session_state.phase == "report_ready":
+            st.subheader("📋 研究报告")
+            st.markdown('<div class="report-wrap">', unsafe_allow_html=True)
+            st.markdown(st.session_state.report)
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("")
+            c1, c2, c3 = st.columns([2, 2, 1])
+            with c1:
+                if st.button("💾 保存报告", type="primary", use_container_width=True):
+                    fp = save_report(question, st.session_state.report)
+                    st.success(f"已保存：{fp}")
+            with c2:
+                if st.button("🔍 继续搜索新内容", use_container_width=True):
+                    st.session_state.phase = "input"
+                    st.session_state.sources = []
+                    st.session_state.report  = ""
+                    st.rerun()
+            with c3:
+                if st.button("🏠 首页", use_container_width=True):
+                    go_home(); st.rerun()
+
+
+# ══════════════════════════════════════════════
+# 模式二：直接生成研究报告
+# ══════════════════════════════════════════════
+elif st.session_state.mode == "direct":
+
+    st.markdown('<div class="breadcrumb">首页 › <span>📝 直接生成研究报告</span></div>', unsafe_allow_html=True)
+
+    # ── 输入 ──
+    if st.session_state.phase == "input":
+        st.markdown("### 你想研究什么问题？")
+        st.caption("AI 会自动搜索多方资料并综合分析，直接生成一份完整的研究报告。")
+        st.markdown("")
+
+        with st.form("direct_form"):
+            q = st.text_input("研究问题", placeholder="例如：2025 年 AI 大模型行业竞争格局分析",
+                              label_visibility="collapsed")
+            if st.form_submit_button("📝 生成研究报告", use_container_width=True, type="primary"):
+                if q.strip():
+                    st.session_state.question = q.strip()
+                    st.session_state.phase = "generating"
+                    st.rerun()
+                else:
+                    st.warning("请输入研究问题")
+
+    # ── 生成中 ──
     elif st.session_state.phase == "generating":
-        with st.spinner("📝 AI 正在综合所有来源，生成研究报告..."):
+        question = st.session_state.question
+        st.markdown(f"### 📝 正在生成报告：{question}")
+
+        with st.status("深度研究进行中...", expanded=True) as status:
+            st.write("🧠 分析问题...")
+            plan    = reason(question)
+            queries = plan.get("search_queries") or [question]
+            st.write(f"🔎 将从 {len(queries)} 个角度搜索资料")
+
+            sources, seen = [], set()
+            for i, query in enumerate(queries, 1):
+                st.write(f"🔎 [{i}/{len(queries)}] 搜索「{query}」...")
+                for r in web_search(query, max_results=3):
+                    url = r.get("href", "")
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    title   = r.get("title", "无标题")
+                    domain  = urlparse(url).netloc
+                    st.write(f"   📄 {title[:50]}...")
+                    content = fetch_page_content(url, max_chars=3000)
+                    if content.startswith("（"):
+                        continue
+                    sources.append({"title": title, "url": url, "domain": domain,
+                                    "raw_content": content})
+
+            st.write(f"✅ 收集完毕，共 {len(sources)} 个来源，正在综合分析...")
+
             chat = client.chats.create(
                 model="gemini-3.1-pro-preview",
                 config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT),
             )
-            context_blocks = [
+            ctx = "\n\n".join([
                 f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
                 for i, s in enumerate(sources)
-            ]
-            context = (
-                f"以下是从 {len(sources)} 个来源收集的资料：\n\n"
-                + "\n\n" + ("─" * 40 + "\n\n").join(context_blocks)
-            )
+            ])
             report = chat.send_message(
-                f"{context}\n\n用户的问题：{question}"
+                f"以下是搜集到的资料：\n\n{ctx}\n\n请针对以下问题生成完整的研究报告：{question}"
             ).text
 
-        st.session_state.report = report
-        st.session_state.phase  = "report_ready"
+            status.update(label="✅ 报告生成完成", state="complete", expanded=False)
+
+        st.session_state.sources = sources
+        st.session_state.report  = report
+        st.session_state.phase   = "done"
         st.rerun()
 
-    elif st.session_state.phase == "report_ready":
-        st.subheader("📋 研究报告")
-        st.markdown(f'<div class="report-box">', unsafe_allow_html=True)
+    # ── 报告展示 ──
+    elif st.session_state.phase == "done":
+        question = st.session_state.question
+        sources  = st.session_state.sources
+
+        st.markdown(f"### 📋 研究报告：{question}")
+
+        # 来源列表（折叠）
+        with st.expander(f"📚 参考来源（{len(sources)} 个）", expanded=False):
+            for i, s in enumerate(sources):
+                st.markdown(f'<span class="tag-blue">{i+1}</span> [{s["title"]}]({s["url"]}) · `{s["domain"]}`', unsafe_allow_html=True)
+
+        st.markdown('<div class="report-wrap">', unsafe_allow_html=True)
         st.markdown(st.session_state.report)
         st.markdown('</div>', unsafe_allow_html=True)
-
         st.markdown("")
-        col_save, col_new = st.columns([1, 1], gap="small")
-        with col_save:
-            if st.button("💾 保存报告到本地", use_container_width=True, type="primary"):
+
+        c1, c2, c3 = st.columns([2, 2, 1])
+        with c1:
+            if st.button("💾 保存报告", type="primary", use_container_width=True):
                 fp = save_report(question, st.session_state.report)
                 st.success(f"已保存：{fp}")
-        with col_new:
-            if st.button("🔄 开始新研究", use_container_width=True):
-                for k, v in _defaults.items():
-                    st.session_state[k] = v
+        with c2:
+            if st.button("📝 重新研究另一个问题", use_container_width=True):
+                st.session_state.phase   = "input"
+                st.session_state.sources = []
+                st.session_state.report  = ""
                 st.rerun()
+        with c3:
+            if st.button("🏠 首页", use_container_width=True):
+                go_home(); st.rerun()
