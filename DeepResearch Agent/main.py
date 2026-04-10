@@ -1,0 +1,572 @@
+# ============================================================
+#   Lightweight DeepResearch Agent — 第五步：自我推理能力
+#   目标：AI 先分析问题、制定策略，再决定怎么行动
+# ============================================================
+#
+#  【命令列表】
+#    直接输入问题     → AI 先推理，再决定搜索/直接回答
+#    scrape <网址>    → 爬取指定网页的完整内容并保存
+#    scrape <网址> <你想要的内容描述>
+#                    → 爬取后让 AI 提取你指定的内容并保存
+#    save             → 保存上一条研究回答为报告
+#    exit             → 退出
+#
+# ============================================================
+
+import os
+import re
+import json
+import datetime
+from urllib.parse import urljoin, urlparse
+from dotenv import load_dotenv           # pip install python-dotenv
+load_dotenv()                            # 自动读取同目录下的 .env 文件
+from google import genai                 # pip install google-genai
+from google.genai import types
+from ddgs import DDGS                   # pip install ddgs
+import httpx                            # pip install httpx
+import trafilatura                      # pip install trafilatura
+from bs4 import BeautifulSoup          # pip install beautifulsoup4
+
+# ──────────────────────────────────────────────
+# 1. 初始化 Gemini 客户端
+# ──────────────────────────────────────────────
+client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+
+# ──────────────────────────────────────────────
+# 2. 系统提示词
+# ──────────────────────────────────────────────
+SYSTEM_PROMPT = """你是一个深度研究助手。
+我会给你提供从多个角度搜索并抓取的网页资料，你需要：
+1. 基于这些资料，对用户的问题给出深入、有条理的分析
+2. 标注哪些信息来自哪个来源（注明网址）
+3. 指出不同来源之间的异同或矛盾
+4. 指出资料的局限性或需要进一步核实的地方
+5. 最后给出你自己的综合判断
+
+请用中文回答，保持专业但易于理解的风格。
+如果搜索结果与问题无关，请直接说明并凭自身知识回答。"""
+
+# ──────────────────────────────────────────────
+# 3. 对话历史（由 chat 对象自动维护）
+# ──────────────────────────────────────────────
+chat = client.chats.create(
+    model="gemini-3.1-pro-preview",
+    config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
+)
+
+last_question = ""
+last_reply = ""
+
+# 确保保存目录存在
+os.makedirs("reports", exist_ok=True)
+os.makedirs("scraped", exist_ok=True)  # 爬取的内容单独存这里
+
+
+# ══════════════════════════════════════════════
+# 工具区
+# ══════════════════════════════════════════════
+
+# ──────────────────────────────────────────────
+# 工具1：抓取单个网页正文
+# ──────────────────────────────────────────────
+def fetch_page_content(url: str, max_chars: int = 2000) -> str:
+    """
+    抓取指定网页的正文内容（过滤广告、导航栏等噪音）。
+    返回纯文字正文，限制 max_chars 字符。
+    """
+    try:
+        resp = httpx.get(
+            url, timeout=10, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        content = trafilatura.extract(resp.text, include_comments=False, include_tables=True)
+        if content:
+            return content[:max_chars]
+        return "（页面无法提取正文，可能是动态渲染页面）"
+    except Exception as e:
+        return f"（抓取失败: {type(e).__name__}）"
+
+
+def fetch_page_full(url: str) -> tuple[str, list[str]]:
+    """
+    完整抓取网页：
+    - 返回 (正文内容, 页面内所有链接列表)
+    用于深度爬取时跟进子链接。
+    """
+    try:
+        resp = httpx.get(
+            url, timeout=10, follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        )
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # 提取正文
+        content = trafilatura.extract(resp.text, include_comments=False, include_tables=True) or ""
+
+        # 提取页面内所有绝对链接（同域名）
+        base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            full = urljoin(base, href)
+            # 只保留同域名的 http/https 链接
+            if full.startswith(base) and full != url:
+                links.append(full)
+
+        return content, list(set(links))
+    except Exception as e:
+        return f"（抓取失败: {type(e).__name__}）", []
+
+
+# ──────────────────────────────────────────────
+# 工具2：保存爬取内容到文件
+# ──────────────────────────────────────────────
+def save_scraped(url: str, content: str, extracted: str = "") -> str:
+    """
+    把爬取的内容保存到 scraped/ 目录。
+    - content: 网页原始正文
+    - extracted: AI 提取后的目标内容（如果有）
+    返回保存路径。
+    """
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # 用域名做文件名，方便识别
+    domain = urlparse(url).netloc.replace(".", "_")
+    filepath = f"scraped/{timestamp}_{domain}.md"
+
+    sections = [
+        f"# 爬取内容",
+        f"",
+        f"**来源网址：** {url}",
+        f"**爬取时间：** {datetime.datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}",
+        f"",
+        f"---",
+    ]
+
+    if extracted:
+        sections += [
+            f"",
+            f"## AI 提取的目标内容",
+            f"",
+            extracted,
+            f"",
+            f"---",
+            f"",
+            f"## 网页完整正文（原始）",
+            f"",
+            content,
+        ]
+    else:
+        sections += [
+            f"",
+            f"## 网页完整正文",
+            f"",
+            content,
+        ]
+
+    sections.append(f"\n---\n*由 DeepResearch Agent 爬取保存*")
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write("\n".join(sections))
+
+    return filepath
+
+
+# ──────────────────────────────────────────────
+# 工具3：深度爬取（一个起始页 → 自动跟进子链接）
+# ──────────────────────────────────────────────
+def deep_scrape(start_url: str, max_pages: int = 5) -> str:
+    """
+    从 start_url 开始，自动发现并爬取同域名的子页面（最多 max_pages 页）。
+    返回所有页面正文的合并文本。
+    """
+    visited = set()
+    queue = [start_url]
+    all_content = []
+
+    while queue and len(visited) < max_pages:
+        url = queue.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+
+        print(f"    爬取第 {len(visited)}/{max_pages} 页: {url[:70]}...")
+        content, links = fetch_page_full(url)
+
+        if content and not content.startswith("（"):
+            all_content.append(f"【页面】{url}\n{content}")
+            # 把新发现的链接加入队列
+            for link in links:
+                if link not in visited:
+                    queue.append(link)
+
+    return "\n\n" + ("─" * 40 + "\n\n").join(all_content)
+
+
+# ──────────────────────────────────────────────
+# 工具4：AI 从爬取内容中提取目标信息
+# ──────────────────────────────────────────────
+def ai_extract(content: str, instruction: str) -> str:
+    """
+    让 Gemini 从爬取的网页内容中，按 instruction 提取你想要的信息。
+    例如：instruction = "提取所有招聘职位名称、薪资和要求"
+    """
+    prompt = f"""请从以下网页内容中，提取出：{instruction}
+
+要求：
+- 只返回提取到的内容，不要加多余解释
+- 用清晰的格式输出（列表、表格均可）
+- 如果找不到相关内容，说明"未找到相关内容"
+
+网页内容：
+{content[:8000]}"""  # 限制输入长度
+
+    response = client.models.generate_content(
+        model="gemini-3.1-pro-preview",
+        contents=prompt
+    )
+    return response.text
+
+
+# ══════════════════════════════════════════════
+# 推理层：AI 先想清楚再行动
+# ══════════════════════════════════════════════
+
+def reason(question: str) -> dict:
+    """
+    让 Gemini 先分析问题，输出结构化的思考计划。
+    返回一个字典，包含：
+      - question_type: 问题类型
+      - need_search:   是否需要联网搜索
+      - reasoning:     推理过程（给用户看）
+      - search_queries: 建议的搜索关键词列表
+      - answer_direct: 如果不需要搜索，直接在这里给出答案
+    """
+    prompt = f"""你是一个严谨的研究助手。请先分析以下问题，制定最佳处理策略。
+
+问题：{question}
+
+请以 JSON 格式返回你的分析，包含以下字段：
+{{
+  "question_type": "问题类型，从以下选一个：实时信息/深度研究/简单事实/闲聊对话",
+  "need_search": true 或 false,
+  "reasoning": "你的分析思路，解释为什么这样处理（2-4句话）",
+  "search_queries": ["搜索词1", "搜索词2", "搜索词3"],
+  "answer_direct": "如果 need_search 为 false，在这里直接给出完整回答；否则留空字符串"
+}}
+
+判断规则：
+- 实时信息（天气/新闻/股价/招聘/活动）→ need_search: true
+- 深度研究（分析/对比/趋势）→ need_search: true
+- 简单事实（AI 本身知识库能准确回答）→ need_search: false
+- 闲聊对话（你好/谢谢/怎么了）→ need_search: false
+
+只返回 JSON，不要返回任何其他内容。"""
+
+    response = client.models.generate_content(
+        model="gemini-3.1-pro-preview",
+        contents=prompt
+    )
+
+    try:
+        text = response.text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:].strip()
+        return json.loads(text)
+    except Exception:
+        # 解析失败就默认搜索
+        return {
+            "question_type": "深度研究",
+            "need_search": True,
+            "reasoning": "（推理解析失败，默认执行搜索）",
+            "search_queries": [question],
+            "answer_direct": ""
+        }
+
+
+# ══════════════════════════════════════════════
+# 研究功能（原有逻辑）
+# ══════════════════════════════════════════════
+
+def web_search(query: str, max_results: int = 3) -> list[dict]:
+    results = []
+    with DDGS() as ddgs:
+        for r in ddgs.text(query, max_results=max_results):
+            results.append(r)
+    return results
+
+
+def generate_sub_queries(question: str) -> list[str]:
+    prompt = f"""请将以下研究问题拆解为3个不同角度的搜索关键词，用于网络搜索。
+每个关键词应该覆盖问题的不同侧面。
+只返回一个 JSON 数组，格式如：["关键词1", "关键词2", "关键词3"]
+不要返回任何其他内容。
+
+研究问题：{question}"""
+
+    response = client.models.generate_content(
+        model="gemini-3.1-pro-preview",
+        contents=prompt
+    )
+    try:
+        text = response.text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:].strip()
+        queries = json.loads(text)
+        return queries if isinstance(queries, list) else [question]
+    except Exception:
+        return [question]
+
+
+def multi_search(question: str) -> str:
+    print("  正在分析问题，生成搜索策略...")
+    sub_queries = generate_sub_queries(question)
+    print(f"  搜索角度: {sub_queries}")
+
+    all_blocks = []
+    seen_urls = set()
+
+    for i, query in enumerate(sub_queries, 1):
+        print(f"\n  [{i}/{len(sub_queries)}] 搜索「{query}」")
+        results = web_search(query, max_results=3)
+        print(f"  找到 {len(results)} 条结果")
+
+        for r in results:
+            url = r.get("href", "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+
+            title = r.get("title", "无标题")
+            summary = r.get("body", "")
+            print(f"    抓取: {url[:70]}...")
+            full_text = fetch_page_content(url)
+
+            block = (
+                f"【标题】{title}\n"
+                f"【网址】{url}\n"
+                f"【摘要】{summary}\n"
+                f"【正文】{full_text}"
+            )
+            all_blocks.append(block)
+
+    if not all_blocks:
+        return "（未找到相关搜索结果）"
+
+    header = f"以下是从 {len(sub_queries)} 个角度搜索并抓取的网页资料（共 {len(all_blocks)} 条）：\n\n"
+    return header + "\n\n" + ("─" * 40 + "\n\n").join(all_blocks)
+
+
+def ask(user_input: str) -> str:
+    """
+    完整处理流程：
+      第一步 → AI 推理：分析问题，制定策略
+      第二步 → 根据策略决定：搜索 or 直接回答
+      第三步 → 综合分析，输出结果
+    """
+    # ── 第一步：推理 ──
+    print("  🧠 正在分析问题...\n")
+    plan = reason(user_input)
+
+    # 打印推理过程（让用户看到 AI 在想什么）
+    print(f"  ┌─ AI 推理过程 {'─'*35}")
+    print(f"  │ 问题类型：{plan.get('question_type', '未知')}")
+    print(f"  │ 需要搜索：{'是' if plan.get('need_search') else '否'}")
+    print(f"  │ 思路：{plan.get('reasoning', '')}")
+    if plan.get('need_search') and plan.get('search_queries'):
+        print(f"  │ 搜索策略：{plan.get('search_queries')}")
+    print(f"  └{'─'*42}\n")
+
+    # ── 第二步：根据推理结果决定行动 ──
+    if not plan.get("need_search"):
+        # 不需要搜索，直接用 AI 知识回答
+        direct_answer = plan.get("answer_direct", "")
+        if direct_answer:
+            # 推理阶段已经给出了回答，直接存入对话历史并返回
+            conversation_msg = f"用户问题：{user_input}\n\n回答：{direct_answer}"
+            chat.send_message(conversation_msg)
+            return direct_answer
+        else:
+            # 让 chat 正常回答
+            return chat.send_message(user_input).text
+
+    # 需要搜索：用推理出的关键词替换自动生成的关键词
+    print("  🔍 开始多角度搜索...\n")
+    sub_queries = plan.get("search_queries") or [user_input]
+
+    all_blocks = []
+    seen_urls = set()
+
+    for i, query in enumerate(sub_queries, 1):
+        print(f"  [{i}/{len(sub_queries)}] 搜索「{query}」")
+        results = web_search(query, max_results=3)
+        print(f"  找到 {len(results)} 条结果")
+
+        for r in results:
+            url = r.get("href", "")
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            title = r.get("title", "无标题")
+            summary = r.get("body", "")
+            print(f"    抓取: {url[:70]}...")
+            full_text = fetch_page_content(url)
+            all_blocks.append(
+                f"【标题】{title}\n【网址】{url}\n【摘要】{summary}\n【正文】{full_text}"
+            )
+
+    if not all_blocks:
+        search_text = "（未找到相关搜索结果）"
+    else:
+        header = f"以下是从 {len(sub_queries)} 个角度搜索并抓取的网页资料（共 {len(all_blocks)} 条）：\n\n"
+        search_text = header + "\n\n" + ("─" * 40 + "\n\n").join(all_blocks)
+
+    # ── 第三步：综合分析 ──
+    print("\n  📝 资料收集完毕，正在深度分析...")
+    full_message = f"{search_text}\n\n用户的问题：{user_input}"
+    response = chat.send_message(full_message)
+    return response.text
+
+
+# ──────────────────────────────────────────────
+# 保存研究报告
+# ──────────────────────────────────────────────
+def save_report(question: str, reply: str) -> str:
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filepath = f"reports/{timestamp}.md"
+    content = f"""# 深度研究报告
+
+**生成时间：** {datetime.datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")}
+
+---
+
+## 研究问题
+
+{question}
+
+---
+
+## 研究结果
+
+{reply}
+
+---
+
+*本报告由 Lightweight DeepResearch Agent 自动生成*
+"""
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+    return filepath
+
+
+# ══════════════════════════════════════════════
+# 处理 scrape 命令
+# ══════════════════════════════════════════════
+def handle_scrape(command: str):
+    """
+    解析 scrape 命令：
+      scrape <网址>                     → 爬取并保存完整正文
+      scrape <网址> <内容描述>          → 爬取后 AI 提取指定内容再保存
+      scrape deep <网址>                → 深度爬取（自动跟进子页面）
+      scrape deep <网址> <内容描述>     → 深度爬取后 AI 提取指定内容
+    """
+    # 去掉开头的 "scrape"
+    parts = command[len("scrape"):].strip()
+
+    deep_mode = False
+    if parts.startswith("deep "):
+        deep_mode = True
+        parts = parts[5:].strip()
+
+    # 分离 URL 和指令（URL 是第一个以 http 开头的词）
+    match = re.match(r'(https?://\S+)\s*(.*)', parts)
+    if not match:
+        print("格式错误。用法：scrape <网址> [你想提取的内容]")
+        print("示例：scrape https://example.com 提取所有招聘岗位和薪资")
+        return
+
+    url = match.group(1)
+    instruction = match.group(2).strip()
+
+    if deep_mode:
+        print(f"\n  开始深度爬取: {url}")
+        print("  （会自动跟进同域名子页面，最多5页）\n")
+        content = deep_scrape(url, max_pages=5)
+    else:
+        print(f"\n  正在爬取: {url}")
+        content, _ = fetch_page_full(url)
+
+    if not content or content.startswith("（"):
+        print(f"爬取失败: {content}")
+        return
+
+    print(f"  爬取成功，正文共 {len(content)} 字符")
+
+    # 如果有提取指令，让 AI 处理
+    extracted = ""
+    if instruction:
+        print(f"  AI 正在提取：{instruction}...")
+        extracted = ai_extract(content, instruction)
+
+    # 保存
+    filepath = save_scraped(url, content, extracted)
+    print(f"\n  已保存到: {filepath}")
+
+    # 打印 AI 提取结果（如果有）
+    if extracted:
+        print(f"\nAI 提取结果：\n{extracted}")
+
+
+# ══════════════════════════════════════════════
+# 主循环
+# ══════════════════════════════════════════════
+def main():
+    global last_question, last_reply
+
+    print("=" * 60)
+    print("  深度研究助手 — 多轮搜索 + 爬取保存版")
+    print()
+    print("  输入问题           → 多角度搜索并研究")
+    print("  scrape <网址>      → 爬取并保存网页内容")
+    print("  scrape <网址> <描述> → 爬取后 AI 提取指定内容")
+    print("  scrape deep <网址> → 深度爬取（自动跟进子页面）")
+    print("  save               → 保存上一条研究报告")
+    print("  exit               → 退出")
+    print("=" * 60)
+
+    while True:
+        user_input = input("\n输入: ").strip()
+
+        if not user_input:
+            continue
+
+        if user_input.lower() == "exit":
+            print("再见！")
+            break
+
+        if user_input.lower() == "save":
+            if not last_reply:
+                print("还没有可以保存的内容，请先提一个问题。")
+                continue
+            filepath = save_report(last_question, last_reply)
+            print(f"报告已保存到: {filepath}")
+            continue
+
+        if user_input.lower().startswith("scrape "):
+            handle_scrape(user_input)
+            continue
+
+        # 普通研究问题
+        print("\n" + "=" * 42)
+        reply = ask(user_input)
+        last_question = user_input
+        last_reply = reply
+        print(f"\n助手:\n{reply}")
+        print("\n（输入 save 可保存本次研究报告）")
+
+
+if __name__ == "__main__":
+    main()
