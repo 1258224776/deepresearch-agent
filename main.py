@@ -37,15 +37,16 @@ USER_AGENTS = [
 ]
 
 # ──────────────────────────────────────────────
-# 1. 初始化 Gemini 客户端
+# 1. 初始化 Gemini 客户端（Vertex AI）
 # ──────────────────────────────────────────────
 def _init_vertex_client():
     """
     本地：GOOGLE_APPLICATION_CREDENTIALS 环境变量指向服务账号 JSON
     Streamlit Cloud：从 Secrets 直接构建 Credentials 对象
+    location 必须用 "global" 才能访问 Gemini 模型
     """
     project  = os.environ.get("GCP_PROJECT_ID", "studied-theater-492805-m1")
-    location = os.environ.get("GCP_LOCATION",   "us-central1")
+    location = "global"
     credentials = None
 
     try:
