@@ -48,6 +48,10 @@ def ai_generate(prompt: str, system: str = "") -> str:
         api_key = load_secret(cfg["env"])
         if not api_key:
             continue
+        # openai 兼容接口需要 openai 包
+        if name != "google" and _OAI is None:
+            print(f"[AI] 跳过 {name}：openai 包未安装")
+            continue
         try:
             if name == "google":
                 client = genai.Client(api_key=api_key)
@@ -55,8 +59,6 @@ def ai_generate(prompt: str, system: str = "") -> str:
                     model=cfg["model"], contents=prompt
                 ).text
             else:
-                if _OAI is None:
-                    raise RuntimeError("openai 未安装，无法使用该提供商")
                 client = _OAI(api_key=api_key, base_url=cfg["base_url"])
                 messages = []
                 if system:
@@ -68,9 +70,11 @@ def ai_generate(prompt: str, system: str = "") -> str:
 
         except Exception as e:
             err_str = str(e)
+            print(f"[AI] {name} 出错: {err_str[:120]}")
             if any(x in err_str for x in ["503", "UNAVAILABLE", "429",
                                            "rate_limit", "overloaded",
-                                           "Too Many", "quota"]):
+                                           "Too Many", "quota",
+                                           "500", "Internal", "model"]):
                 print(f"[AI] {name} 暂时不可用，切换下一个提供商...")
                 last_err = e
                 continue
