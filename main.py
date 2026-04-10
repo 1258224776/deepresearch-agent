@@ -22,7 +22,6 @@ from dotenv import load_dotenv           # pip install python-dotenv
 load_dotenv()                            # 自动读取同目录下的 .env 文件
 from google import genai                 # pip install google-genai
 from google.genai import types
-from google.oauth2 import service_account as _sa
 from ddgs import DDGS                   # pip install ddgs
 import httpx                            # pip install httpx
 import trafilatura                      # pip install trafilatura
@@ -37,38 +36,19 @@ USER_AGENTS = [
 ]
 
 # ──────────────────────────────────────────────
-# 1. 初始化 Gemini 客户端（Vertex AI）
+# 1. 初始化 Gemini 客户端（AI Studio）
 # ──────────────────────────────────────────────
-def _init_vertex_client():
-    """
-    本地：GOOGLE_APPLICATION_CREDENTIALS 环境变量指向服务账号 JSON
-    Streamlit Cloud：从 Secrets 直接构建 Credentials 对象
-    location 必须用 "global" 才能访问 Gemini 模型
-    """
-    project  = os.environ.get("GCP_PROJECT_ID", "studied-theater-492805-m1")
-    location = "global"
-    credentials = None
+def _get_api_key():
+    key = os.environ.get("GOOGLE_API_KEY", "")
+    if not key:
+        try:
+            import streamlit as st
+            key = st.secrets.get("GOOGLE_API_KEY", "")
+        except Exception:
+            pass
+    return key
 
-    try:
-        import streamlit as st
-        if "GCP_SERVICE_ACCOUNT" in st.secrets:
-            key_raw  = st.secrets["GCP_SERVICE_ACCOUNT"]
-            key_dict = json.loads(key_raw) if isinstance(key_raw, str) else dict(key_raw)
-            credentials = _sa.Credentials.from_service_account_info(
-                key_dict,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-            print("[Vertex Auth] ✅ Credentials loaded from Streamlit secrets")
-    except Exception as e:
-        print(f"[Vertex Auth] ❌ Failed to load credentials: {e}")
-
-    if credentials:
-        return genai.Client(vertexai=True, project=project,
-                            location=location, credentials=credentials)
-    # 本地走 GOOGLE_APPLICATION_CREDENTIALS
-    return genai.Client(vertexai=True, project=project, location=location)
-
-client = _init_vertex_client()
+client = genai.Client(api_key=_get_api_key())
 
 # ──────────────────────────────────────────────
 # 2. 系统提示词
@@ -88,7 +68,7 @@ SYSTEM_PROMPT = """你是一个深度研究助手。
 # 3. 对话历史（由 chat 对象自动维护）
 # ──────────────────────────────────────────────
 chat = client.chats.create(
-    model="gemini-2.0-flash-001",
+    model="gemini-2.0-flash",
     config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
 )
 
@@ -278,7 +258,7 @@ def extract_key_points(content: str, question: str) -> str:
 要求：每条以 "• " 开头，一句话，包含具体数据或观点；去掉广告/导航噪音；只返回要点列表。
 网页内容：\n{content[:4000]}"""
     return client.models.generate_content(
-        model="gemini-2.0-flash-001", contents=prompt
+        model="gemini-2.0-flash", contents=prompt
     ).text
 
 
@@ -303,7 +283,7 @@ def summarize_source(content: str, question: str, title: str) -> dict:
 
     try:
         text = client.models.generate_content(
-            model="gemini-2.0-flash-001", contents=prompt
+            model="gemini-2.0-flash", contents=prompt
         ).text.strip()
         if "```" in text:
             text = re.split(r"```(?:json)?", text)[1].strip().rstrip("`").strip()
@@ -337,7 +317,7 @@ def compile_digest(sources: list, question: str) -> str:
 - 用中文，专业流畅"""
 
     return client.models.generate_content(
-        model="gemini-2.0-flash-001", contents=prompt
+        model="gemini-2.0-flash", contents=prompt
     ).text
 
 
@@ -357,7 +337,7 @@ def ai_extract(content: str, instruction: str) -> str:
 {content[:8000]}"""  # 限制输入长度
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
+        model="gemini-2.0-flash",
         contents=prompt
     )
     return response.text
@@ -399,7 +379,7 @@ def reason(question: str) -> dict:
 只返回 JSON，不要返回任何其他内容。"""
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
+        model="gemini-2.0-flash",
         contents=prompt
     )
 
@@ -442,7 +422,7 @@ def generate_sub_queries(question: str) -> list[str]:
 研究问题：{question}"""
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash-001",
+        model="gemini-2.0-flash",
         contents=prompt
     )
     try:
