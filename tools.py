@@ -126,7 +126,7 @@ def fetch_via_jina(url: str, max_chars: int = 15000) -> str:
     jina_url = f"https://r.jina.ai/{url}"
     try:
         resp = httpx.get(
-            jina_url, timeout=25, follow_redirects=True,
+            jina_url, timeout=10, follow_redirects=True,
             headers={
                 "Accept": "text/plain",
                 "User-Agent": USER_AGENTS[0],

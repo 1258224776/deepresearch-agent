@@ -917,10 +917,20 @@ def render_agg_dashboard(digest: str) -> None:
             new_badge = '<span class="agg-new-badge">今日新增</span>' if item.get("is_new") else ""
             val = item.get("value") or ""
             val_html = f'<div class="agg-item-value">{val}</div>' if val else ""
+            item_url = item.get("url") or ""
+            title_text = item.get("title", "")
+            if item_url:
+                title_inner = (
+                    f'<a href="{item_url}" target="_blank" rel="noopener noreferrer" '
+                    f'style="color:inherit;text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.3);">'
+                    f'{title_text}</a>'
+                )
+            else:
+                title_inner = title_text
             parts.append(
                 f'<div class="agg-item-card">'
                 f'<div class="agg-item-left">'
-                f'<div class="agg-item-title">{item.get("title","")}{new_badge}</div>'
+                f'<div class="agg-item-title">{title_inner}{new_badge}</div>'
                 f'<div class="agg-item-sub">{item.get("subtitle","")}</div>'
                 f'<div class="agg-item-tags">{tags_html}</div>'
                 f'</div>{val_html}</div>'
@@ -1356,7 +1366,10 @@ elif st.session_state.mode == "scrape":
                 return v or ""
 
             df = pd.DataFrame([{k: _normalize(item.get(k)) for k in display_keys} for item in agg_items])
-            st.dataframe(df, use_container_width=True, height=450)
+            col_cfg = {}
+            if "url" in display_keys:
+                col_cfg["url"] = st.column_config.LinkColumn("链接", display_text="🔗 打开")
+            st.dataframe(df, use_container_width=True, height=450, column_config=col_cfg)
 
             # 下载按钮
             csv = df.to_csv(index=False).encode("utf-8-sig")
@@ -2012,7 +2025,10 @@ elif st.session_state.mode == "url_extract":
                 return v or ""
 
             df = pd.DataFrame([{k: _norm(item.get(k)) for k in display_keys} for item in items])
-            st.dataframe(df, use_container_width=True, height=420)
+            col_cfg_ue = {}
+            if "url" in display_keys:
+                col_cfg_ue["url"] = st.column_config.LinkColumn("链接", display_text="🔗 打开")
+            st.dataframe(df, use_container_width=True, height=420, column_config=col_cfg_ue)
 
             csv = df.to_csv(index=False).encode("utf-8-sig")
             c1, c2, c3 = st.columns([2, 2, 1])

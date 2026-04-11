@@ -160,7 +160,7 @@ ROLE_ORDER: dict[str, str] = {
 }
 
 # ── 并发爬取线程数 ──
-FETCH_WORKERS = 4
+FETCH_WORKERS = 8
 
 # ── 每个搜索角度最多取几条结果 ──
 SEARCH_MAX_RESULTS = 5
@@ -172,7 +172,7 @@ SEARCH_MAX_QUERIES = 4
 CHUNK_SIZE = 2000
 
 # ── URL 提取流水线：并发打工线程数 ──
-WORKER_THREADS = 6
+WORKER_THREADS = 10
 
 # ── Worker 并发限速：每次请求前随机延迟范围（秒） ──
 JITTER_RANGE = (0.2, 0.8)

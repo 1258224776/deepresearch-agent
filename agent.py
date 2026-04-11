@@ -438,6 +438,41 @@ def orchestrate(user_intent: str, engine: str = "") -> dict:
         }
 
 
+def _preclean_text(text: str) -> str:
+    """
+    文本预清洗：切块前去除导航栏、页脚、版权声明、广告等噪音行。
+    保留实质性内容，提升打工 AI 提取精度，同时减少 Token 消耗。
+    """
+    # 噪音行特征（正则，匹配则丢弃整行）
+    NOISE_PATTERNS = [
+        r"^(首页|home|导航|nav|menu|菜单)\s*[>｜|]",   # 面包屑导航
+        r"(copyright|版权所有|©|\(c\)|all rights reserved)",
+        r"(cookie|隐私政策|privacy policy|使用条款|terms of use)",
+        r"(关注我们|follow us|扫码关注|微信公众号|二维码)",
+        r"(加载中|loading\.\.|skeleton|占位符)",
+        r"^(分享|share|转发|点赞|收藏|举报)\s*$",
+        r"(广告|advertisement|sponsored|赞助商)",
+        r"^\s*(上一篇|下一篇|相关推荐|猜你喜欢|热门推荐)\s*$",
+        r"^\s*[\|｜─\-─]{3,}\s*$",                    # 纯分隔符行
+        r"^\s*(登录|注册|login|sign up|sign in)\s*$",
+        r"(icp备|京icp|粤icp|工业和信息化部)",          # 备案号
+    ]
+    compiled = [re.compile(p, re.IGNORECASE) for p in NOISE_PATTERNS]
+
+    lines = text.splitlines()
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        # 跳过过短行（纯数字、单字符、空行）
+        if len(stripped) < 5:
+            continue
+        if any(pat.search(stripped) for pat in compiled):
+            continue
+        cleaned.append(line)
+
+    return "\n".join(cleaned)
+
+
 def _smart_chunk(text: str, base_size: int = CHUNK_SIZE) -> list[str]:
     """
     智能切块：按段落边界切分，根据内容总长度动态调整块数上限。
@@ -467,14 +502,16 @@ def _worker_extract_chunk(args: tuple) -> list[dict]:
     线程工作函数：对单个文本块调用打工 AI 提取结构化数据。
     包含 Jitter 延迟（防限速）+ 强力 JSON 清洗。
     """
-    chunk, fields_desc, worker_instructions, source_url, engine = args
+    chunk, fields_desc, worker_instructions, source_url, engine, neg_kws, disc_criteria = args
 
     # Jitter：随机微小延迟，防高并发触发 Rate Limit
     time.sleep(random.uniform(*JITTER_RANGE))
 
     try:
         raw = ai_generate_role(
-            prompt_worker_extract(chunk, fields_desc, worker_instructions),
+            prompt_worker_extract(chunk, fields_desc, worker_instructions,
+                                  negative_keywords=neg_kws,
+                                  discrimination_criteria=disc_criteria),
             role="worker",
             engine=engine,
         )
@@ -515,11 +552,13 @@ def run_url_pipeline(
     # ── Step 1: 主脑规划 ──
     engine_label = ENGINE_PRESETS.get(engine, {}).get("label", "默认") if engine else "默认"
     cb(1, 10, f"🧠 主脑 AI 正在解析意图（{engine_label}）...")
-    schema  = orchestrate(user_intent, engine=engine)
-    target  = schema.get("target_object", "条目")
-    fields  = schema.get("fields", [])
-    w_instr = schema.get("worker_instructions", "")
-    dedup_k = schema.get("dedup_keys") or ["title"]
+    schema      = orchestrate(user_intent, engine=engine)
+    target      = schema.get("target_object", "条目")
+    fields      = schema.get("fields", [])
+    w_instr     = schema.get("worker_instructions", "")
+    dedup_k     = schema.get("dedup_keys") or ["title"]
+    neg_kws     = schema.get("negative_keywords") or []
+    disc_crit   = schema.get("discrimination_criteria", "")
 
     fields_desc = "\n".join(
         f'- {f["key"]}（{f["label"]}）：{f.get("desc", "")}{"（必填）" if f.get("required") else ""}'
@@ -554,8 +593,9 @@ def run_url_pipeline(
     # ── Step 3: 智能切块 + 并发打工提取（Map + Jitter）──
     all_chunks: list[tuple] = []
     for url, content in raw_contents:
-        for chunk in _smart_chunk(content, CHUNK_SIZE):
-            all_chunks.append((chunk, fields_desc, w_instr, url, engine))
+        clean = _preclean_text(content)          # 预清洗：去导航/页脚/广告噪音
+        for chunk in _smart_chunk(clean, CHUNK_SIZE):
+            all_chunks.append((chunk, fields_desc, w_instr, url, engine, neg_kws, disc_crit))
 
     reasoning_log.append(f"**文本块：** {len(all_chunks)} 块（Jitter 限速 {JITTER_RANGE[0]}-{JITTER_RANGE[1]}s）")
     cb(4, 10, f"📋 {len(all_chunks)} 块 × {WORKER_THREADS} 线程并发提取中（含限速保护）...")

@@ -263,9 +263,9 @@ def prompt_scrape_digest(combined_content: str, topic: str) -> str:
 def prompt_orchestrate(user_intent: str) -> str:
     """主脑 Prompt：理解用户意图，生成字段 Schema + 打工指令。"""
     return f"""你是一位数据提取架构师。用户想从一批网页中提取特定信息，你的任务是：
-1. 理解用户意图
+1. 理解用户意图，精确锁定目标对象
 2. 定义标准化的数据字段（JSON Schema）
-3. 为后续"打工 AI"生成简洁的提取指令
+3. 为后续"打工 AI"生成严格的提取指令，包含判别标准和排除规则
 
 用户意图：
 {user_intent}
@@ -273,42 +273,58 @@ def prompt_orchestrate(user_intent: str) -> str:
 请严格以 JSON 格式返回，结构如下：
 {{
   "task_summary": "用一句话描述本次提取任务",
-  "target_object": "要提取的对象（如：二手房源、竞品产品、招聘岗位）",
+  "target_object": "要提取的对象（如：二手房源、AI Agent 招聘岗位、竞品产品）",
   "fields": [
     {{
       "key": "字段英文 key（snake_case）",
       "label": "字段中文名",
-      "desc": "提取说明（告诉打工 AI 怎么找这个字段）",
+      "desc": "提取说明（告诉打工 AI 怎么找这个字段，以及判断依据）",
       "required": true或false
     }}
   ],
-  "worker_instructions": "给打工 AI 的简洁作业指令（2-4句话），说明：提取什么、怎么判断相关条目、没找到时返回空数组",
-  "dedup_keys": ["用于去重的字段 key 列表，通常是标题+价格或标题+公司"],
-  "dashboard_hint": "给汇总 AI 的提示，说明本次数据的核心分析维度（如：重点分析价格分布和区域热度）"
+  "worker_instructions": "给打工 AI 的严格作业指令（3-5句话）：①提取什么对象 ②核心判别标准（什么算符合条件）③负面排除规则（什么情况即使名字相似也要丢弃）④没找到时返回空数组",
+  "negative_keywords": ["排除关键词列表：包含这些词的条目应被丢弃，如['销售','中介','保险','理财顾问','传统金融']"],
+  "discrimination_criteria": "核心判别标准（1-2句话），说明如何区分真正符合条件的条目与表面相似的噪音数据",
+  "dedup_keys": ["用于去重的字段 key 列表，通常是标题+公司或标题+价格"],
+  "dashboard_hint": "给汇总 AI 的提示，说明本次数据的核心分析维度（如：重点分析薪资分布和技术栈热度）"
 }}
 
 只返回 JSON，不要其他内容。"""
 
 
-def prompt_worker_extract(chunk: str, fields_desc: str, worker_instructions: str) -> str:
+def prompt_worker_extract(chunk: str, fields_desc: str, worker_instructions: str,
+                          negative_keywords: list | None = None,
+                          discrimination_criteria: str = "") -> str:
     """打工 Prompt：从单个文本块中按 Schema 提取结构化条目。"""
-    return f"""你是一个结构化数据提取专员。
+    neg_section = ""
+    if negative_keywords:
+        neg_section = f"""
+负面关键词（包含以下任意词的条目必须丢弃，即使名称看起来相关）：
+{', '.join(negative_keywords)}
+"""
+    disc_section = ""
+    if discrimination_criteria:
+        disc_section = f"""
+核心判别标准：
+{discrimination_criteria}
+"""
+    return f"""你是一个结构化数据提取专员，同时也是严格的审核员。
 
 作业指令：
 {worker_instructions}
-
+{disc_section}{neg_section}
 需要提取的字段：
 {fields_desc}
 
 以下是网页文本片段：
 {chunk}
 
-要求：
-- 找出文本中所有符合条件的条目
-- 每个条目严格按字段 key 返回 JSON 对象
-- 没有的字段填 null，不要编造数据
-- 只返回 JSON 数组（找不到任何条目时返回 []）
-- 不要任何解释文字"""
+提取规则（按顺序执行）：
+1. 找出所有初步符合条件的候选条目
+2. 【审核】逐条检查：不符合判别标准、或包含负面关键词的条目 → 直接丢弃
+3. 通过审核的条目：严格按字段 key 返回 JSON 对象，没有的字段填 null，不要编造数据
+4. 只返回 JSON 数组（审核后无任何合格条目时返回 []）
+5. 不要任何解释文字，不要编造不存在的数据"""
 
 
 def prompt_chat_with_report(question: str, report: str, history: str, user_msg: str) -> str:
