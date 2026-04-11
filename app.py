@@ -536,6 +536,172 @@ div[data-testid="stStatusWidget"] {
     border: 1px solid rgba(99,102,241,0.20) !important;
     background: rgba(15,23,42,0.8) !important;
 }
+
+/* ══════════════════════════════
+   功能页：表单 / 输入卡片
+══════════════════════════════ */
+div[data-testid="stForm"] {
+    background: rgba(15, 23, 42, 0.75) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(99,102,241,0.20) !important;
+    border-radius: 20px !important;
+    padding: 32px 36px !important;
+    position: relative;
+    overflow: hidden;
+}
+div[data-testid="stForm"]::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #6366f1, #3b82f6, transparent);
+    opacity: 0.5;
+}
+
+/* ── 功能页 Hero 输入区 ── */
+.page-hero {
+    max-width: 700px;
+    margin: 0 auto;
+    padding: 48px 0 32px;
+    text-align: center;
+    animation: fadeUp 0.6s ease both;
+}
+.page-hero-title {
+    font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+    font-weight: 800;
+    color: #f1f5f9;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+}
+.page-hero-title .accent {
+    background: linear-gradient(135deg, #818cf8 0%, #60a5fa 50%, #a78bfa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.page-hero-sub {
+    font-size: 0.95rem;
+    color: #475569;
+    line-height: 1.75;
+    margin-bottom: 36px;
+}
+
+/* ── 顶部导航优化 ── */
+.topbar-wrap {
+    background: rgba(3, 6, 15, 0.85);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    margin: -32px -24px 36px;
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    animation: fadeIn 0.3s ease;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+.topbar-brand {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #818cf8;
+    display: flex; align-items: center; gap: 8px;
+}
+.topbar-brand .dot {
+    width: 7px; height: 7px;
+    background: #6366f1;
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgba(99,102,241,0.9);
+    animation: pulseGlow 2.5s ease-in-out infinite;
+}
+.topbar-crumb-new {
+    font-size: 0.8rem;
+    color: #334155;
+    display: flex; align-items: center; gap: 8px;
+}
+.topbar-crumb-new .sep { color: #1e293b; }
+.topbar-crumb-new .cur { color: #818cf8; font-weight: 600; }
+
+/* ── 进度条美化 ── */
+div[data-testid="stProgress"] > div {
+    background: rgba(255,255,255,0.05) !important;
+    border-radius: 100px !important;
+    overflow: hidden;
+}
+div[data-testid="stProgress"] > div > div {
+    background: linear-gradient(90deg, #4f46e5, #3b82f6, #818cf8) !important;
+    border-radius: 100px !important;
+    transition: width 0.3s ease !important;
+}
+
+/* ── chat 消息 ── */
+div[data-testid="stChatMessage"] {
+    background: rgba(255,255,255,0.025) !important;
+    border: 1px solid rgba(255,255,255,0.06) !important;
+    border-radius: 14px !important;
+    padding: 14px 18px !important;
+    margin-bottom: 10px !important;
+}
+
+/* ── info / warning / success 提示 ── */
+div[data-testid="stAlert"] {
+    border-radius: 12px !important;
+    border: none !important;
+    background: rgba(99,102,241,0.08) !important;
+    border-left: 3px solid rgba(99,102,241,0.5) !important;
+    color: #a5b4fc !important;
+    font-size: 0.86rem !important;
+}
+
+/* ── dataframe ── */
+div[data-testid="stDataFrame"] {
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    border-radius: 14px !important;
+    overflow: hidden !important;
+    background: rgba(13,21,32,0.9) !important;
+}
+
+/* ── select / radio ── */
+div[data-testid="stSelectbox"] > div,
+div[data-testid="stMultiSelect"] > div {
+    background: #0f1729 !important;
+    border: 1px solid rgba(99,102,241,0.25) !important;
+    border-radius: 10px !important;
+    color: #cbd5e1 !important;
+}
+
+/* ── file uploader ── */
+div[data-testid="stFileUploader"] {
+    background: rgba(255,255,255,0.02) !important;
+    border: 1.5px dashed rgba(99,102,241,0.30) !important;
+    border-radius: 14px !important;
+    padding: 20px !important;
+}
+div[data-testid="stFileUploader"]:hover {
+    border-color: rgba(99,102,241,0.55) !important;
+    background: rgba(99,102,241,0.04) !important;
+}
+
+/* ── spinner ── */
+div[data-testid="stSpinner"] {
+    color: #818cf8 !important;
+}
+
+/* ── download button ── */
+div[data-testid="stDownloadButton"] > button {
+    background: rgba(99,102,241,0.10) !important;
+    border: 1px solid rgba(99,102,241,0.30) !important;
+    color: #a5b4fc !important;
+    border-radius: 10px !important;
+    font-size: 0.84rem !important;
+    font-weight: 600 !important;
+}
+div[data-testid="stDownloadButton"] > button:hover {
+    background: rgba(99,102,241,0.20) !important;
+    border-color: rgba(99,102,241,0.55) !important;
+    color: #c7d2fe !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -721,26 +887,25 @@ if st.session_state.mode == "home":
 # ══════════════════════════════════════════════
 elif st.session_state.mode == "scrape":
 
-    # 顶栏
-    nav_l, nav_m, nav_r = st.columns([1, 4, 1])
-    with nav_l:
-        st.markdown('<div class="back-btn-wrap">', unsafe_allow_html=True)
-        if st.button("← 返回首页", key="back_scrape"):
-            go_home(); st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    with nav_m:
-        st.markdown("""
-<div style="text-align:center;padding:8px 0">
-  <span style="font-size:0.82rem;color:#475569">首页 › <span style="color:#818cf8;font-weight:600">🔍 搜索 & 爬取</span></span>
-</div>""", unsafe_allow_html=True)
-    st.markdown('<div style="border-bottom:1px solid rgba(255,255,255,0.05);margin-bottom:28px"></div>', unsafe_allow_html=True)
+    # ── 顶部导航栏 ──
+    st.markdown("""
+<div class="topbar-wrap">
+  <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
+  <div class="topbar-crumb-new">
+    首页 <span class="sep">›</span> <span class="cur">🔍 搜索 &amp; 爬取</span>
+  </div>
+  <div></div>
+</div>
+""", unsafe_allow_html=True)
+    if st.button("← 返回首页", key="back_scrape"):
+        go_home(); st.rerun()
 
     # ── 输入 ──
     if st.session_state.phase == "input":
         st.markdown("""
-<div style="max-width:700px;margin:0 auto;padding:32px 0 16px;text-align:center">
-  <div style="font-size:1.8rem;font-weight:800;color:#f1f5f9;letter-spacing:-0.02em;margin-bottom:10px">你想搜索什么？</div>
-  <div style="font-size:0.93rem;color:#475569;margin-bottom:28px">描述你感兴趣的主题，AI 会自动规划搜索策略并抓取多个网页。</div>
+<div class="page-hero">
+  <div class="page-hero-title">你想<span class="accent">搜索</span>什么？</div>
+  <div class="page-hero-sub">描述你感兴趣的主题，AI 会自动判断意图、规划搜索策略并并行抓取多个网页。</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1089,25 +1254,24 @@ elif st.session_state.mode == "scrape":
 # ══════════════════════════════════════════════
 elif st.session_state.mode == "direct":
 
-    # 顶栏
-    nav_l2, nav_m2, nav_r2 = st.columns([1, 4, 1])
-    with nav_l2:
-        st.markdown('<div class="back-btn-wrap">', unsafe_allow_html=True)
-        if st.button("← 返回首页", key="back_direct"):
-            go_home(); st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    with nav_m2:
-        st.markdown("""
-<div style="text-align:center;padding:8px 0">
-  <span style="font-size:0.82rem;color:#475569">首页 › <span style="color:#818cf8;font-weight:600">📝 生成研究报告</span></span>
-</div>""", unsafe_allow_html=True)
-    st.markdown('<div style="border-bottom:1px solid rgba(255,255,255,0.05);margin-bottom:28px"></div>', unsafe_allow_html=True)
+    # ── 顶部导航栏 ──
+    st.markdown("""
+<div class="topbar-wrap">
+  <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
+  <div class="topbar-crumb-new">
+    首页 <span class="sep">›</span> <span class="cur">📝 生成研究报告</span>
+  </div>
+  <div></div>
+</div>
+""", unsafe_allow_html=True)
+    if st.button("← 返回首页", key="back_direct"):
+        go_home(); st.rerun()
 
     if st.session_state.phase == "input":
         st.markdown("""
-<div style="max-width:700px;margin:0 auto;padding:32px 0 16px;text-align:center">
-  <div style="font-size:1.8rem;font-weight:800;color:#f1f5f9;letter-spacing:-0.02em;margin-bottom:10px">你想研究什么问题？</div>
-  <div style="font-size:0.93rem;color:#475569;margin-bottom:28px">AI 会自动搜索多方资料、综合分析，直接生成一份完整的研究报告。</div>
+<div class="page-hero">
+  <div class="page-hero-title">你想<span class="accent">研究</span>什么？</div>
+  <div class="page-hero-sub">AI 自动搜索多方资料、综合分析，直接生成结构完整、有数据支撑的深度报告。</div>
 </div>
 """, unsafe_allow_html=True)
 
