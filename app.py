@@ -807,7 +807,7 @@ elif st.session_state.mode == "scrape":
         st.rerun()
 
     # ── 展示结果 ──
-    elif st.session_state.phase in ("sources_ready", "gen_report", "report_ready"):
+    elif st.session_state.phase in ("sources_ready", "gen_report", "report_ready", "scrape_digest"):
         question = st.session_state.question
         sources  = st.session_state.sources
         digest   = st.session_state.digest
