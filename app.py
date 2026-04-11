@@ -1112,7 +1112,13 @@ with st.sidebar:
                 new_docs.append({"name": f.name, "content": content})
         if new_docs:
             st.session_state.local_docs.extend(new_docs)
-            st.success(f"✅ 已加载 {len(new_docs)} 个文档")
+            # 静默重建 RAG 向量库
+            try:
+                import rag as _rag
+                n = _rag.build_vector_store(st.session_state.local_docs)
+                st.success(f"✅ 已加载 {len(new_docs)} 个文档，向量化 {n} 个文本块")
+            except Exception as _e:
+                st.success(f"✅ 已加载 {len(new_docs)} 个文档（RAG 未启用：{_e}）")
     if st.session_state.local_docs:
         for doc in st.session_state.local_docs:
             c1, c2 = st.columns([4, 1])
@@ -1121,6 +1127,12 @@ with st.sidebar:
             with c2:
                 if st.button("✕", key=f"rm_{doc['name']}"):
                     st.session_state.local_docs = [d for d in st.session_state.local_docs if d["name"] != doc["name"]]
+                    # 删除文档后重建向量库
+                    try:
+                        import rag as _rag
+                        _rag.build_vector_store(st.session_state.local_docs)
+                    except Exception:
+                        pass
                     st.rerun()
 
     st.divider()
@@ -1603,10 +1615,16 @@ elif st.session_state.mode == "scrape":
                 # 融合本地文档
                 local_ctx = ""
                 if st.session_state.local_docs:
-                    local_ctx = "\n\n【本地文档资料】\n" + "\n\n".join([
-                        f"《{d['name']}》\n{d['content'][:3000]}"
-                        for d in st.session_state.local_docs
-                    ])
+                    try:
+                        import rag as _rag
+                        _rag.build_vector_store(st.session_state.local_docs)
+                        local_ctx = "\n\n【本地文档精准摘录（RAG检索）】\n" + _rag.retrieve_as_context(question)
+                    except Exception:
+                        # 降级：截取前3000字
+                        local_ctx = "\n\n【本地文档资料】\n" + "\n\n".join([
+                            f"《{d['name']}》\n{d['content'][:3000]}"
+                            for d in st.session_state.local_docs
+                        ])
                 report = ai_generate(
                     f"以下是搜集到的资料：\n\n{ctx}{local_ctx}\n\n请针对以下问题生成完整研究报告：{question}",
                     system=tpl_sys,
@@ -1796,10 +1814,15 @@ elif st.session_state.mode == "direct":
             ])
             local_ctx = ""
             if st.session_state.local_docs:
-                local_ctx = "\n\n【本地文档资料】\n" + "\n\n".join([
-                    f"《{d['name']}》\n{d['content'][:3000]}"
-                    for d in st.session_state.local_docs
-                ])
+                try:
+                    import rag as _rag
+                    _rag.build_vector_store(st.session_state.local_docs)
+                    local_ctx = "\n\n【本地文档精准摘录（RAG检索）】\n" + _rag.retrieve_as_context(question)
+                except Exception:
+                    local_ctx = "\n\n【本地文档资料】\n" + "\n\n".join([
+                        f"《{d['name']}》\n{d['content'][:3000]}"
+                        for d in st.session_state.local_docs
+                    ])
             report = ai_generate(
                 f"以下资料：\n\n{ctx}{local_ctx}\n\n问题：{question}\n\n请生成完整研究报告。",
                 system=tpl_sys,
