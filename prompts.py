@@ -135,9 +135,17 @@ def prompt_reason(question: str) -> str:
 - **research（深度研究）**：用户想理解某话题、获取知识、写分析报告。如：AI趋势、技术原理、行业分析、某事件背景。
 - **aggregation（数据汇总）**：用户想收集一批资源或列表数据。如：找工作、找房子、商品比价、企业名录、开源项目列表、竞品收集。
 
+【英文技术术语识别规则】（最高优先级）
+以下英文词在技术/招聘语境中有专属含义，搜索词必须保留原始英文，禁止翻译：
+- "AI Agent / Agent" → AI智能体工程师（≠销售代理/保险代理/房产中介）
+  搜索词示例："AI Agent 工程师 招聘"、"LLM Agent 开发岗位"、"智能体 Agent 算法工程师"
+- "LLM / RAG / MCP / Prompt" → 大模型相关技术岗位
+- "DevOps / MLOps / SRE" → 技术运维岗位
+- 其他英文缩写/术语同理，直接用英文搜索
+
 aggregation 模式下搜索词规则：
 - 必须使用 site: 语法定向到专业平台
-- 找工作 → site:liepin.com / site:zhaopin.com / site:lagou.com / site:boss.zhipin.com
+- 找技术工作（AI/算法/工程师）→ site:boss.zhipin.com / site:lagou.com / site:liepin.com / site:zhaopin.com
 - 找房子 → site:lianjia.com / site:anjuke.com / site:ke.com
 - 找公司 → site:tianyancha.com / site:qichacha.com
 - 开源项目 → site:github.com
@@ -162,6 +170,7 @@ aggregation 模式下搜索词规则：
 
 def prompt_summarize_source(content: str, question: str, title: str) -> str:
     return f"""你是信息提炼专家。针对研究主题"{question}"，分析以下网页。
+注意：若主题含"AI Agent/LLM/智能体/算法/大模型"等技术词，"Agent"指AI智能体工程师，非销售/保险/房产代理。
 
 标题：{title}
 内容：
@@ -341,8 +350,18 @@ def prompt_chat_with_report(question: str, report: str, history: str, user_msg: 
 
 
 def prompt_extract_list(page_content: str, target_item: str) -> str:
+    # 自动生成技术术语识别提示
+    tech_hint = ""
+    tech_terms = ["AI Agent", "Agent", "LLM", "RAG", "MCP", "大模型", "智能体", "算法", "机器学习", "深度学习"]
+    if any(t.lower() in target_item.lower() for t in tech_terms):
+        tech_hint = """
+【重要判别规则】本次目标含技术/AI关键词，提取时必须严格区分：
+✅ 保留：AI工程师、算法工程师、AI Agent开发、LLM工程师、智能体研发、提示工程师等技术岗位
+❌ 丢弃：销售代理、保险代理、房产中介、招商代理、渠道代理——即使职位名含"Agent"或"代理"也必须丢弃
+判断标准：职位是否需要编程/模型/AI技术能力？是→保留，否→丢弃。
+"""
     return f"""以下是一个网页的正文内容，用户想收集【{target_item}】的列表信息。
-
+{tech_hint}
 请找出网页中所有相关条目，以严格的 JSON 数组格式返回。
 每个对象尽量包含以下字段（没有的字段填 null）：
 title（名称/职位/标题）、company（公司/发布者）、price（价格/薪资）、location（地点）、tags（标签列表）、url（链接）、desc（简短描述）
