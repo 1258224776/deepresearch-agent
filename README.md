@@ -8,6 +8,15 @@
 
 ## ✨ 核心功能
 
+### 🤖 Agent 自主模式（新功能）
+输入任意问题，AI 自主决策每一步行动：
+1. **思考**：分析当前信息缺口，决定下一步
+2. **调用工具**：搜索网络 / 爬取网页 / 检索本地文档
+3. **观察结果**：消化工具返回的内容，继续推理
+4. **循环直到完成**：自主判断何时信息充足，输出完整报告
+
+全程可见每步的**思考过程 + 工具调用 + 观察结果**，真正的 ReAct Agent 架构。
+
 ### ⚡ URL 智能提取（核心亮点）
 粘贴任意网址 + 描述你想要什么，系统自动完成：
 1. **主脑 AI** 理解意图，动态生成字段规则（Schema）
@@ -29,7 +38,7 @@
 
 | 提供商 | 用途 | 是否需要 VPN |
 |--------|------|------------|
-| Google Gemini 2.5 Pro | 主脑（最强推理） | ✅ 需要 |
+| Google Gemini 3.0 Pro Preview | 主脑（最强推理） | ✅ 需要 |
 | Claude Opus 4.6 | 主脑备选（洞察天花板） | ✅ 需要 |
 | Google Gemini 2.5 Flash | 打工（极速提取） | ✅ 需要 |
 | Claude Haiku 4.5 | 打工备选 | ✅ 需要 |
@@ -96,12 +105,14 @@ streamlit run app.py
 
 ```
 deepresearch-agent/
-├── app.py          # Streamlit 前端主程序
-├── agent.py        # AI 调用核心：多提供商路由、流水线逻辑
-├── prompts.py      # 所有 Prompt 模板集中管理
-├── config.py       # 提供商配置、引擎预设、全局常量
-├── tools.py        # 爬虫工具：搜索、抓取、文件处理
-└── .env            # API Key 配置（不提交 Git）
+├── app.py           # Streamlit 前端主程序（4 种模式）
+├── agent.py         # AI 调用核心：多提供商路由、流水线逻辑
+├── agent_loop.py    # ReAct Agent 核心：工具注册 + 推理循环
+├── prompts.py       # 所有 Prompt 模板集中管理
+├── config.py        # 提供商配置、引擎预设、全局常量
+├── tools.py         # 爬虫工具：搜索、抓取、文件处理
+├── rag.py           # 本地向量检索（Faiss + Sentence-Transformers）
+└── .env             # API Key 配置（不提交 Git）
 ```
 
 ---

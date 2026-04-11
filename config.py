@@ -35,10 +35,10 @@ PROVIDERS: dict[str, dict] = {
 
     # ━━━ 海外阵营（需 VPN）━━━━━━━━━━━━━━━━━━━━━
 
-    # 主脑首选：Google Gemini 2.5 Pro（全球榜 #1，长文本无敌）
+    # 主脑首选：Google Gemini 3.0 Pro Preview（全球榜 #1，长文本无敌）
     "google_pro": {
         "env":               "GOOGLE_API_KEY",
-        "model":             "gemini-2.5-pro-preview-06-05",
+        "model":             "gemini-3.0-pro-preview",
         "type":              "google",
         "structured_output": True,   # 支持 response_mime_type=application/json
     },
