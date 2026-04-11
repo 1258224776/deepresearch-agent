@@ -19,27 +19,144 @@ USER_AGENTS = [
     "Gecko/20100101 Firefox/123.0",
 ]
 
-# ── 多 AI 提供商配置 ──
+# ══════════════════════════════════════════════
+# 多 AI 提供商配置
+#
+# type 字段说明：
+#   "google"      → google-genai SDK（需 VPN）
+#   "anthropic"   → anthropic SDK（需 VPN）
+#   "openai_compat" → OpenAI 兼容接口（国内直连）
+#
+# structured_output 字段：
+#   True  → 调用时启用原生 JSON 模式，返回 100% 合法 JSON
+#   False → 依赖 Prompt 约束 + 正则清洗
+# ══════════════════════════════════════════════
 PROVIDERS: dict[str, dict] = {
+
+    # ━━━ 海外阵营（需 VPN）━━━━━━━━━━━━━━━━━━━━━
+
+    # 主脑首选：Google Gemini 2.5 Pro（全球榜 #1，长文本无敌）
+    "google_pro": {
+        "env":               "GOOGLE_API_KEY",
+        "model":             "gemini-2.5-pro-preview-06-05",
+        "type":              "google",
+        "structured_output": True,   # 支持 response_mime_type=application/json
+    },
+    # 主脑备选：Claude Opus 4.6（LMArena 盲测第一，洞察天花板）
+    "claude_opus": {
+        "env":               "ANTHROPIC_API_KEY",
+        "model":             "claude-opus-4-6",
+        "type":              "anthropic",
+        "structured_output": False,
+    },
+    # 打工首选：Gemini 2.5 Flash（极速 + 原生 JSON 模式）
     "google": {
-        "env":   "GOOGLE_API_KEY",
-        "model": "gemini-2.5-flash",
+        "env":               "GOOGLE_API_KEY",
+        "model":             "gemini-2.5-flash",
+        "type":              "google",
+        "structured_output": True,
     },
+    # 打工备选：Claude Haiku 4.5（HTML 结构提取王者）
+    "claude_haiku": {
+        "env":               "ANTHROPIC_API_KEY",
+        "model":             "claude-haiku-4-5-20251001",
+        "type":              "anthropic",
+        "structured_output": False,
+    },
+
+    # ━━━ 国内直连阵营 ━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    # 智谱 GLM —— 主脑：GLM-5（国内榜第一梯队首位）
+    "glm_pro": {
+        "env":               "GLM_API_KEY",
+        "model":             "glm-5",
+        "base_url":          "https://open.bigmodel.cn/api/paas/v4/",
+        "type":              "openai_compat",
+        "structured_output": False,
+    },
+    # 智谱 GLM —— 打工：GLM-4-Flash（毫秒级响应，高并发友好）
     "glm": {
-        "env":      "GLM_API_KEY",
-        "model":    "glm-5",
-        "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+        "env":               "GLM_API_KEY",
+        "model":             "glm-4-flash",
+        "base_url":          "https://open.bigmodel.cn/api/paas/v4/",
+        "type":              "openai_compat",
+        "structured_output": False,
     },
+
+    # MiniMax —— 主脑：MiniMax-M2.7（格式遵从极优，幻觉极少）
     "minimax": {
-        "env":      "MINIMAX_API_KEY",
-        "model":    "MiniMax-M2.7",
-        "base_url": "https://api.minimax.chat/v1/",
+        "env":               "MINIMAX_API_KEY",
+        "model":             "MiniMax-M2.7",
+        "base_url":          "https://api.minimax.chat/v1/",
+        "type":              "openai_compat",
+        "structured_output": False,
     },
+    # MiniMax —— 打工：abab6.5g（高并发低延迟优化）
+    "minimax_worker": {
+        "env":               "MINIMAX_API_KEY",
+        "model":             "abab6.5g",
+        "base_url":          "https://api.minimax.chat/v1/",
+        "type":              "openai_compat",
+        "structured_output": False,
+    },
+
+    # 硅基流动 —— 主脑：DeepSeek-V3（满血开源旗舰）
+    "siliconflow_pro": {
+        "env":               "SILICONFLOW_API_KEY",
+        "model":             "deepseek-ai/DeepSeek-V3",
+        "base_url":          "https://api.siliconflow.cn/v1/",
+        "type":              "openai_compat",
+        "structured_output": False,
+    },
+    # 硅基流动 —— 打工：Qwen2.5-7B（速度极快，注意 JSON 标签清洗）
+    "siliconflow": {
+        "env":               "SILICONFLOW_API_KEY",
+        "model":             "Qwen/Qwen2.5-7B-Instruct",
+        "base_url":          "https://api.siliconflow.cn/v1/",
+        "type":              "openai_compat",
+        "structured_output": False,
+    },
+
+    # OpenAI（保留兼容）
     "openai": {
-        "env":      "OPENAI_API_KEY",
-        "model":    "gpt-4o-mini",
-        "base_url": "https://api.openai.com/v1/",
+        "env":               "OPENAI_API_KEY",
+        "model":             "gpt-4o-mini",
+        "base_url":          "https://api.openai.com/v1/",
+        "type":              "openai_compat",
+        "structured_output": False,
     },
+}
+
+# ══════════════════════════════════════════════
+# 引擎预设
+#
+# 深度分析模式：海外最强主脑 + 全线 Worker，质量最高（需 VPN）
+# 极速直连模式：全程国内模型，无需 VPN，数秒出结果
+#
+# 每项格式：逗号分隔的 provider 名称，运行时按序尝试
+# ══════════════════════════════════════════════
+ENGINE_PRESETS: dict[str, dict] = {
+    "deep": {
+        "label":        "🌟 深度分析",
+        "desc":         "主脑用全球最强模型，洞察质量最高（需 VPN）",
+        "orchestrator": "google_pro,claude_opus,glm_pro,minimax,siliconflow_pro",
+        "worker":       "google,claude_haiku,glm,minimax_worker,siliconflow",
+        "analyst":      "google_pro,claude_opus,glm_pro,minimax",
+    },
+    "fast": {
+        "label":        "⚡ 极速直连",
+        "desc":         "全程国内模型，无需 VPN，秒级响应",
+        "orchestrator": "glm_pro,minimax,siliconflow_pro",
+        "worker":       "glm,minimax_worker,siliconflow",
+        "analyst":      "glm_pro,minimax,siliconflow_pro",
+    },
+}
+
+# 角色化路由（独立使用时的默认顺序，可被引擎预设覆盖）
+ROLE_ORDER: dict[str, str] = {
+    "orchestrator": "google_pro,claude_opus,glm_pro,minimax,siliconflow_pro",
+    "worker":       "google,claude_haiku,glm,minimax_worker,siliconflow",
+    "analyst":      "google_pro,glm_pro,minimax,siliconflow_pro",
 }
 
 # ── 并发爬取线程数 ──
@@ -51,17 +168,32 @@ SEARCH_MAX_RESULTS = 5
 # ── 搜索角度上限 ──
 SEARCH_MAX_QUERIES = 4
 
+# ── URL 提取流水线：基础切块字符数（动态调整，见 agent.py） ──
+CHUNK_SIZE = 2000
+
+# ── URL 提取流水线：并发打工线程数 ──
+WORKER_THREADS = 6
+
+# ── Worker 并发限速：每次请求前随机延迟范围（秒） ──
+JITTER_RANGE = (0.2, 0.8)
+
+# ── 网络探测超时（秒） ──
+NETWORK_PROBE_TIMEOUT = 4
+
 
 _secret_cache: dict[str, str] = {}
 
 
 def load_secret(key: str) -> str:
-    """先读环境变量，再尝试 Streamlit Secrets（云端部署时用）。
+    """
+    优先级：session state 临时 Key → 环境变量 → Streamlit Secrets。
     结果会被缓存，以便在 ThreadPoolExecutor 子线程中也能正常读取。
     """
     if key in _secret_cache:
         return _secret_cache[key]
+    # 先读环境变量
     val = os.environ.get(key, "")
+    # 再尝试 Streamlit Secrets（云端部署）
     if not val:
         try:
             import streamlit as st
@@ -70,3 +202,10 @@ def load_secret(key: str) -> str:
             pass
     _secret_cache[key] = val
     return val
+
+
+def set_runtime_key(env_key: str, value: str) -> None:
+    """允许前端在运行时注入 API Key（覆盖缓存，不写 .env）。"""
+    if value and value.strip():
+        _secret_cache[env_key] = value.strip()
+        os.environ[env_key] = value.strip()

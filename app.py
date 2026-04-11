@@ -9,8 +9,10 @@ import streamlit as st
 from agent import (
     ai_generate, reason, summarize_source, compile_digest,
     ai_extract, cross_validate, generate_scrape_digest,
-    chat_with_report, run_research,
+    chat_with_report, run_research, run_url_pipeline,
+    detect_network_mode,
 )
+from config import ENGINE_PRESETS, set_runtime_key
 from tools import (
     web_search, fetch_page_content, fetch_page_full,
     deep_scrape, save_scraped, save_report, parse_uploaded_file,
@@ -24,7 +26,7 @@ st.set_page_config(
     page_title="DeepResearch Agent",
     page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ──────────────────────────────────────────────
@@ -84,7 +86,7 @@ st.markdown("""
 }
 
 /* ── 隐藏 Streamlit 默认元素 ── */
-#MainMenu, footer, header { visibility: hidden; }
+footer { visibility: hidden; }
 .block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; max-width: 1200px !important; }
 
 /* ══════════════════════════════
@@ -702,6 +704,100 @@ div[data-testid="stDownloadButton"] > button:hover {
     border-color: rgba(99,102,241,0.55) !important;
     color: #c7d2fe !important;
 }
+
+/* ══════════════════════════════
+   Aggregation Dashboard
+══════════════════════════════ */
+.agg-dashboard { display:flex; flex-direction:column; gap:20px; animation:fadeUp 0.5s ease both; }
+.agg-title { font-size:1.5rem; font-weight:800; color:#f1f5f9; letter-spacing:-0.02em; margin-bottom:4px; }
+
+/* stat cards */
+.agg-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+.agg-stat-card {
+    background:rgba(15,23,42,0.88);
+    border:1px solid rgba(99,102,241,0.18);
+    border-radius:16px; padding:18px 18px 14px; text-align:center;
+}
+.agg-stat-value { font-size:1.9rem; font-weight:800; color:#22d3ee; letter-spacing:-0.03em; line-height:1; margin-bottom:6px; }
+.agg-stat-label { font-size:0.76rem; color:#64748b; font-weight:500; }
+.agg-stat-change { font-size:0.82rem; font-weight:600; margin-top:6px; }
+.agg-stat-change.pos { color:#10b981; }
+.agg-stat-change.neg { color:#ef4444; }
+
+/* highlights */
+.agg-highlights { display:flex; flex-direction:column; gap:9px; }
+.agg-hl-row {
+    background:rgba(15,23,42,0.72); border:1px solid rgba(255,255,255,0.06);
+    border-left:3px solid; border-radius:10px; padding:11px 16px;
+    display:flex; align-items:center; gap:10px;
+    font-size:0.91rem; color:#e2e8f0;
+}
+.agg-hl-icon { font-size:1.05rem; flex-shrink:0; }
+.agg-hl-content { flex:1; line-height:1.55; }
+.agg-hl-tag {
+    font-size:0.70rem; font-weight:700; padding:2px 10px; border-radius:100px;
+    background:rgba(34,211,238,0.15); color:#22d3ee; white-space:nowrap;
+}
+
+/* section title */
+.agg-section-title {
+    font-size:1rem; font-weight:700; color:#94a3b8;
+    margin-top:4px; margin-bottom:10px;
+    padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.06);
+}
+
+/* top items */
+.agg-items-list { display:flex; flex-direction:column; gap:9px; }
+.agg-item-card {
+    background:rgba(15,23,42,0.75); border:1px solid rgba(255,255,255,0.07);
+    border-radius:14px; padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+}
+.agg-item-left { flex:1; min-width:0; }
+.agg-item-title { font-size:0.97rem; font-weight:700; color:#f1f5f9; margin-bottom:3px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.agg-item-sub { font-size:0.80rem; color:#64748b; margin-bottom:7px; }
+.agg-item-tags { display:flex; flex-wrap:wrap; gap:5px; }
+.agg-tag { font-size:0.70rem; font-weight:600; padding:2px 9px; border-radius:100px; background:rgba(99,102,241,0.15); color:#818cf8; }
+.agg-new-badge { font-size:0.67rem; font-weight:700; padding:2px 8px; border-radius:100px; background:rgba(239,68,68,0.18); color:#f87171; }
+.agg-item-value { font-size:1.35rem; font-weight:800; color:#f59e0b; white-space:nowrap; }
+
+/* analysis */
+.agg-analysis { display:flex; flex-direction:column; gap:18px; }
+.agg-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; }
+.agg-metric-card { background:rgba(15,23,42,0.72); border:1px solid rgba(99,102,241,0.14); border-radius:14px; padding:14px 16px; }
+.agg-metric-value { font-size:1.55rem; font-weight:800; color:#22d3ee; line-height:1.2; }
+.agg-metric-label { font-size:0.76rem; color:#64748b; margin-top:4px; }
+.agg-metric-sub { font-size:0.73rem; color:#475569; margin-top:3px; }
+
+/* distributions */
+.agg-dist-title { font-size:0.82rem; font-weight:600; color:#64748b; margin-bottom:8px; }
+.agg-dist-bars { display:flex; flex-direction:column; gap:9px; }
+.agg-dist-row { display:flex; align-items:center; gap:10px; }
+.agg-dist-label { font-size:0.80rem; color:#94a3b8; min-width:36px; }
+.agg-dist-bar-wrap { flex:1; background:rgba(255,255,255,0.05); border-radius:100px; height:7px; overflow:hidden; }
+.agg-dist-bar-fill { height:100%; border-radius:100px; background:linear-gradient(90deg,#10b981,#22d3ee); }
+.agg-dist-pct { font-size:0.76rem; color:#64748b; white-space:nowrap; min-width:90px; }
+
+/* directions */
+.agg-directions { display:flex; flex-wrap:wrap; gap:10px; }
+.agg-dir-chip { background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.07); border-radius:13px; padding:10px 14px; min-width:72px; text-align:center; }
+.agg-dir-name { font-size:0.75rem; color:#64748b; margin-bottom:3px; }
+.agg-dir-count { font-size:1.25rem; font-weight:800; color:#e2e8f0; }
+.agg-dir-trend { font-size:0.70rem; font-weight:600; margin-top:3px; }
+.agg-dir-trend.trend-up { color:#10b981; }
+.agg-dir-trend.trend-down { color:#ef4444; }
+.agg-dir-trend.trend-flat { color:#64748b; }
+
+/* recommendations */
+.agg-recs { display:flex; flex-direction:column; gap:9px; }
+.agg-rec-card {
+    background:rgba(15,23,42,0.75); border:1px solid rgba(255,255,255,0.06);
+    border-left:3px solid; border-radius:12px; padding:13px 16px;
+    display:flex; gap:11px; align-items:flex-start;
+}
+.agg-rec-icon { font-size:1.15rem; flex-shrink:0; margin-top:1px; }
+.agg-rec-title { font-size:0.90rem; font-weight:700; color:#e2e8f0; margin-bottom:3px; }
+.agg-rec-content { font-size:0.82rem; color:#64748b; line-height:1.6; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -722,6 +818,15 @@ _defaults = {
     "local_docs":    [],   # [{name, content}]
     "task_mode":     "research",  # "research" 或 "aggregation"
     "agg_items":     [],          # aggregation 模式下提取的结构化数据
+    # ── URL 智能提取模式 ──
+    "ue_urls":       "",          # 用户输入的 URL 列表（原始字符串）
+    "ue_intent":     "",          # 用户提取意图
+    "ue_engine":     "fast",      # 引擎预设："deep" | "fast"
+    "ue_schema":     {},          # 主脑生成的字段 Schema
+    "ue_items":      [],          # 打工 AI 提取的结构化条目
+    "ue_dashboard":  "",          # 看板 AI 生成的 Dashboard JSON
+    "ue_log":        [],          # 流水线推理日志
+    "net_mode":      "",          # 网络探测结果："overseas"|"domestic"|""
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -737,6 +842,164 @@ def go_home():
     for k, v in _defaults.items():
         st.session_state[k] = v
 
+
+def render_agg_dashboard(digest: str) -> None:
+    """将 aggregation 模式下 AI 生成的 JSON 报告渲染为可视化卡片面板。"""
+    import json as _json
+    import re as _re
+
+    try:
+        text = digest.strip()
+        if "```" in text:
+            text = _re.split(r"```(?:json)?", text)[1].strip().rstrip("`").strip()
+        data = _json.loads(text)
+    except Exception:
+        # 解析失败退回纯文本
+        st.markdown(
+            f'<div class="digest-card"><div class="digest-body">'
+            f'{digest.replace(chr(10), "<br>")}</div></div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    COLOR_MAP = {"green": "#10b981", "blue": "#3b82f6", "orange": "#f59e0b", "red": "#ef4444"}
+    REC_COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#a78bfa", "#ef4444"]
+
+    parts: list[str] = ['<div class="agg-dashboard">']
+
+    # ── 标题 ──
+    title = data.get("title", "数据汇总")
+    parts.append(f'<div class="agg-title">{title}</div>')
+
+    # ── 统计指标卡片 ──
+    stats = data.get("stats") or []
+    if stats:
+        parts.append('<div class="agg-stats">')
+        for s in stats:
+            change = s.get("change") or ""
+            is_pos = s.get("is_positive")
+            chg_cls = "pos" if is_pos is True else ("neg" if is_pos is False else "")
+            chg_html = f'<div class="agg-stat-change {chg_cls}">{change}</div>' if change else ""
+            parts.append(
+                f'<div class="agg-stat-card">'
+                f'<div class="agg-stat-value">{s.get("value","")}</div>'
+                f'<div class="agg-stat-label">{s.get("label","")}</div>'
+                f'{chg_html}</div>'
+            )
+        parts.append('</div>')
+
+    # ── 高亮发现 ──
+    highlights = data.get("highlights") or []
+    if highlights:
+        parts.append('<div class="agg-highlights">')
+        for h in highlights:
+            color = COLOR_MAP.get(h.get("color", "blue"), "#3b82f6")
+            tag = h.get("tag") or ""
+            tag_html = f'<span class="agg-hl-tag">{tag}</span>' if tag else ""
+            parts.append(
+                f'<div class="agg-hl-row" style="border-left-color:{color}">'
+                f'<span class="agg-hl-icon">{h.get("icon","")}</span>'
+                f'<span class="agg-hl-content">{h.get("content","")}</span>'
+                f'{tag_html}</div>'
+            )
+        parts.append('</div>')
+
+    # ── 亮点条目 ──
+    top_items = data.get("top_items") or []
+    if top_items:
+        parts.append('<div class="agg-section-title">今日亮点条目</div>')
+        parts.append('<div class="agg-items-list">')
+        for item in top_items:
+            tags_html = "".join(
+                f'<span class="agg-tag">{t}</span>'
+                for t in (item.get("tags") or [])
+            )
+            new_badge = '<span class="agg-new-badge">今日新增</span>' if item.get("is_new") else ""
+            val = item.get("value") or ""
+            val_html = f'<div class="agg-item-value">{val}</div>' if val else ""
+            parts.append(
+                f'<div class="agg-item-card">'
+                f'<div class="agg-item-left">'
+                f'<div class="agg-item-title">{item.get("title","")}{new_badge}</div>'
+                f'<div class="agg-item-sub">{item.get("subtitle","")}</div>'
+                f'<div class="agg-item-tags">{tags_html}</div>'
+                f'</div>{val_html}</div>'
+            )
+        parts.append('</div>')
+
+    # ── 数据分析 ──
+    analysis  = data.get("analysis") or {}
+    metrics   = analysis.get("metrics") or []
+    dists     = analysis.get("distributions") or []
+    dirs      = analysis.get("directions") or []
+
+    if metrics or dists or dirs:
+        parts.append('<div class="agg-section-title">数据分析</div>')
+        parts.append('<div class="agg-analysis">')
+
+        if metrics:
+            parts.append('<div class="agg-metrics">')
+            for m in metrics:
+                parts.append(
+                    f'<div class="agg-metric-card">'
+                    f'<div class="agg-metric-value">{m.get("value","")}</div>'
+                    f'<div class="agg-metric-label">{m.get("label","")}</div>'
+                    f'<div class="agg-metric-sub">{m.get("sub","")}</div>'
+                    f'</div>'
+                )
+            parts.append('</div>')
+
+        for dist in dists:
+            parts.append(f'<div class="agg-dist-title">{dist.get("group","")}</div>')
+            parts.append('<div class="agg-dist-bars">')
+            for it in (dist.get("items") or []):
+                pct = it.get("pct", 0)
+                parts.append(
+                    f'<div class="agg-dist-row">'
+                    f'<span class="agg-dist-label">{it.get("label","")}</span>'
+                    f'<div class="agg-dist-bar-wrap">'
+                    f'<div class="agg-dist-bar-fill" style="width:{pct}%"></div></div>'
+                    f'<span class="agg-dist-pct">{it.get("count","")} · {pct}%</span>'
+                    f'</div>'
+                )
+            parts.append('</div>')
+
+        if dirs:
+            parts.append('<div class="agg-directions">')
+            for d in dirs:
+                trend = str(d.get("trend") or "")
+                tcls = "trend-up" if "+" in trend else ("trend-down" if "-" in trend else "trend-flat")
+                parts.append(
+                    f'<div class="agg-dir-chip">'
+                    f'<div class="agg-dir-name">{d.get("name","")}</div>'
+                    f'<div class="agg-dir-count">{d.get("count","")}</div>'
+                    f'<div class="agg-dir-trend {tcls}">{trend}</div>'
+                    f'</div>'
+                )
+            parts.append('</div>')
+
+        parts.append('</div>')  # agg-analysis
+
+    # ── 行动建议 ──
+    recs = data.get("recommendations") or []
+    if recs:
+        parts.append('<div class="agg-section-title">行动建议</div>')
+        parts.append('<div class="agg-recs">')
+        for i, rec in enumerate(recs):
+            color = REC_COLORS[i % len(REC_COLORS)]
+            parts.append(
+                f'<div class="agg-rec-card" style="border-left-color:{color}">'
+                f'<div class="agg-rec-icon">{rec.get("icon","")}</div>'
+                f'<div><div class="agg-rec-title">{rec.get("title","")}</div>'
+                f'<div class="agg-rec-content">{rec.get("content","")}</div></div>'
+                f'</div>'
+            )
+        parts.append('</div>')
+
+    parts.append('</div>')  # agg-dashboard
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+
 # ──────────────────────────────────────────────
 # 侧边栏
 # ──────────────────────────────────────────────
@@ -744,9 +1007,81 @@ with st.sidebar:
     st.markdown("#### 🔬 DeepResearch")
     if st.button("← 回首页", use_container_width=True):
         go_home(); st.rerun()
+
     st.divider()
 
-    # ── 本地文档上传 ──
+    # ══════════════════════════════════════════
+    # 引擎选择 + 网络自动探测
+    # ══════════════════════════════════════════
+    st.markdown("**⚡ 运行引擎**")
+
+    # 网络探测按钮
+    net_mode = st.session_state.get("net_mode", "")
+    net_label = {
+        "overseas": "🟢 海外节点可用",
+        "domestic": "🔴 仅国内直连",
+        "":         "⚪ 未探测",
+    }.get(net_mode, "⚪ 未探测")
+    col_net1, col_net2 = st.columns([2, 1])
+    with col_net1:
+        st.caption(net_label)
+    with col_net2:
+        if st.button("测速", key="probe_net", use_container_width=True):
+            with st.spinner("探测中..."):
+                detected = detect_network_mode()
+            st.session_state.net_mode = detected
+            # 自动切换推荐引擎
+            if detected == "domestic" and st.session_state.ue_engine == "deep":
+                st.session_state.ue_engine = "fast"
+                st.toast("🔴 检测到海外不可达，已自动切换为极速直连模式", icon="⚡")
+            elif detected == "overseas":
+                st.toast("🟢 海外节点可用，可使用深度分析模式", icon="🌟")
+            st.rerun()
+
+    for eid, epreset in ENGINE_PRESETS.items():
+        is_sel = st.session_state.ue_engine == eid
+        border = "rgba(99,102,241,0.6)" if is_sel else "rgba(255,255,255,0.07)"
+        bg     = "rgba(99,102,241,0.10)" if is_sel else "rgba(255,255,255,0.02)"
+        st.markdown(f"""
+<div style="background:{bg};border:1px solid {border};border-radius:10px;padding:10px 12px;margin-bottom:6px">
+  <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0">{epreset['label']}</div>
+  <div style="font-size:0.73rem;color:#475569;margin-top:2px">{epreset['desc']}</div>
+</div>""", unsafe_allow_html=True)
+        if not is_sel:
+            if st.button(f"切换到此模式", key=f"eng_{eid}", use_container_width=True):
+                st.session_state.ue_engine = eid
+                st.rerun()
+
+    st.divider()
+
+    # ══════════════════════════════════════════
+    # API Key 管理（防刷爆额度，朋友自填）
+    # ══════════════════════════════════════════
+    with st.expander("🔑 API Key 配置", expanded=False):
+        st.caption("在此填入 Key 后立即生效，不写入磁盘，刷新页面后失效。")
+
+        _key_fields = [
+            ("GOOGLE_API_KEY",       "Google / Gemini"),
+            ("ANTHROPIC_API_KEY",    "Anthropic / Claude"),
+            ("GLM_API_KEY",          "智谱 GLM"),
+            ("MINIMAX_API_KEY",      "MiniMax"),
+            ("SILICONFLOW_API_KEY",  "硅基流动"),
+        ]
+        for env_k, label in _key_fields:
+            val = st.text_input(
+                label,
+                type="password",
+                placeholder="sk-…（留空表示使用服务器默认）",
+                key=f"apikey_{env_k}",
+            )
+            if val and val.strip():
+                set_runtime_key(env_k, val.strip())
+
+    st.divider()
+
+    # ══════════════════════════════════════════
+    # 本地文档上传
+    # ══════════════════════════════════════════
     st.markdown("**📂 上传本地文档**")
     st.caption("研究时 AI 会将本地数据与网络资料交叉融合")
     uploaded = st.file_uploader(
@@ -786,17 +1121,17 @@ with st.sidebar:
                 content = deep_scrape(s_url, 5) if s_deep else fetch_page_full(s_url)[0]
             if content and not content.startswith("（"):
                 extracted = ai_extract(content, s_inst) if s_inst else ""
-                fp = save_scraped(s_url, content, extracted)
-                st.success(f"✅ 已保存")
+                save_scraped(s_url, content, extracted)
+                st.success("✅ 已保存")
                 if extracted:
                     st.markdown(extracted)
             else:
-                st.error(f"❌ 爬取失败")
+                st.error("❌ 爬取失败")
 
     st.divider()
     st.markdown("**📁 已保存文件**")
-    reports = sorted([f for f in os.listdir("reports") if f.endswith(".md")], reverse=True)[:4]
-    scraped_files = sorted([f for f in os.listdir("scraped") if f.endswith(".md")], reverse=True)[:4]
+    reports       = sorted([f for f in os.listdir("reports") if f.endswith(".md")], reverse=True)[:4]
+    scraped_files = sorted([f for f in os.listdir("scraped")  if f.endswith(".md")], reverse=True)[:4]
     for f in reports:
         st.markdown(f'<div class="file-item">📄 {f}</div>', unsafe_allow_html=True)
     for f in scraped_files:
@@ -815,10 +1150,12 @@ if st.session_state.mode == "home":
   <div class="hero-badge">✦ AI-Powered Research</div>
   <div class="hero-title">深度研究，<span class="accent">交给 AI</span></div>
   <div class="hero-sub">自动搜索全网资料，智能提炼关键信息，生成专业研究报告——只需输入一个问题。</div>
-</div>
+  
+                
+                
 """, unsafe_allow_html=True)
 
-    col1, col2 = st.columns(2, gap="large")
+    col1, col2, col3 = st.columns(3, gap="large")
 
     with col1:
         st.markdown("""
@@ -859,6 +1196,27 @@ if st.session_state.mode == "home":
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("生成研究报告 →", use_container_width=True, type="primary", key="b_report"):
             st.session_state.mode = "direct"
+            st.session_state.phase = "input"
+            st.rerun()
+
+    with col3:
+        st.markdown("""
+<div class="mode-card">
+  <div class="mode-card-glow"></div>
+  <div class="mode-icon-wrap">⚡</div>
+  <div class="mode-title">URL 智能提取</div>
+  <div class="mode-desc">粘贴任意网址 + 描述你想要什么，主脑 AI 制定规则，打工 AI 并发提取，自动生成数据看板。</div>
+  <div class="mode-steps">
+    <span class="mode-step">① 贴入 URL</span>
+    <span class="mode-step">② 描述意图</span>
+    <span class="mode-step">③ 并发提取</span>
+    <span class="mode-step">④ 看板呈现</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("开始 URL 提取 →", use_container_width=True, type="primary", key="b_ue"):
+            st.session_state.mode = "url_extract"
             st.session_state.phase = "input"
             st.rerun()
 
@@ -981,10 +1339,10 @@ elif st.session_state.mode == "scrape":
             for line in st.session_state.reasoning_log:
                 st.markdown(f"<p style='color:#64748b;font-size:0.86rem;padding:3px 0'>{line}</p>", unsafe_allow_html=True)
 
-        # AI 数据分析报告
+        # AI 数据分析报告（可视化卡片面板）
         if digest:
             st.markdown('<div class="section-title">📊 AI 数据分析报告</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="digest-card"><div class="digest-body">{digest.replace(chr(10),"<br>")}</div></div>', unsafe_allow_html=True)
+            render_agg_dashboard(digest)
 
         # 结构化数据表格
         if agg_items:
@@ -1450,3 +1808,230 @@ elif st.session_state.mode == "direct":
                     )
                 st.markdown(answer)
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
+
+
+# ══════════════════════════════════════════════
+# 模式四：URL 智能提取
+# ══════════════════════════════════════════════
+elif st.session_state.mode == "url_extract":
+    import pandas as pd
+
+    # ── 顶部导航栏 ──
+    st.markdown("""
+<div class="topbar-wrap">
+  <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
+  <div class="topbar-crumb-new">
+    首页 <span class="sep">›</span> <span class="cur">⚡ URL 智能提取</span>
+  </div>
+  <div></div>
+</div>
+""", unsafe_allow_html=True)
+    if st.button("← 返回首页", key="back_ue"):
+        go_home(); st.rerun()
+
+    # ══════════════════════════════════════════════
+    # 阶段一：输入
+    # ══════════════════════════════════════════════
+    if st.session_state.phase == "input":
+        st.markdown("""
+<div class="page-hero">
+  <div class="page-hero-title">告诉 AI 你想<span class="accent">提取什么</span></div>
+  <div class="page-hero-sub">粘贴目标网址，用一句话描述意图——主脑 AI 自动制定规则，打工 AI 并发提取，秒出数据看板。</div>
+</div>
+""", unsafe_allow_html=True)
+
+        # ── 行业模板快捷标签 ──
+        UE_TEMPLATES = {
+            "🏢 房源分析":  "帮我提取这些链接里的二手房/租房信息，重点关注小区名、总价、单价、面积、楼层、建成年代和区域。",
+            "💻 竞品监测":  "提取这些竞品页面里的产品名称、核心功能亮点、定价、目标用户和最新发布动态。",
+            "🛒 电商比价":  "从这些商品页面提取商品名、品牌、当前售价、原价、评分、销量和主要规格参数。",
+            "👔 职位速报":  "提取这些招聘页面里的职位名称、公司名、薪资范围、工作地点、经验要求和学历要求。",
+            "📰 新闻事件":  "从这些新闻页面提取事件标题、发生时间、核心内容摘要、涉及主体和关键数据。",
+        }
+
+        # ── 当前引擎徽章 ──
+        cur_engine  = st.session_state.ue_engine
+        cur_preset  = ENGINE_PRESETS.get(cur_engine, {})
+        engine_html = (
+            f'<span style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);'
+            f'border-radius:100px;padding:3px 12px;font-size:0.75rem;font-weight:700;color:#a5b4fc">'
+            f'{cur_preset.get("label","默认引擎")}</span>'
+        )
+        st.markdown(
+            f'<div style="margin-bottom:12px">{engine_html} '
+            f'<span style="font-size:0.75rem;color:#334155;margin-left:6px">'
+            f'可在左侧侧边栏切换引擎或测速</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div style="font-size:0.78rem;font-weight:600;color:#475569;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">快捷模板</div>', unsafe_allow_html=True)
+        tag_cols = st.columns(len(UE_TEMPLATES))
+        for col, (label, prompt_text) in zip(tag_cols, UE_TEMPLATES.items()):
+            with col:
+                if st.button(label, use_container_width=True, key=f"tpl_{label}"):
+                    st.session_state.ue_intent = prompt_text
+                    st.rerun()
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        with st.form("ue_form"):
+            url_input = st.text_area(
+                "目标 URL 列表（每行一个）",
+                value=st.session_state.ue_urls,
+                height=140,
+                placeholder="https://example.com/page1\nhttps://example.com/page2\n...",
+                label_visibility="visible",
+            )
+            intent_input = st.text_area(
+                "提取意图（描述你想要什么）",
+                value=st.session_state.ue_intent,
+                height=100,
+                placeholder="例如：帮我提取这些链接里的招聘岗位，重点关注职位名、公司、薪资、工作地点和经验要求。",
+                label_visibility="visible",
+            )
+            submitted = st.form_submit_button("⚡ 启动智能提取", use_container_width=True, type="primary")
+
+        if submitted:
+            urls_raw = [u.strip() for u in url_input.splitlines() if u.strip().startswith("http")]
+            if not urls_raw:
+                st.error("❌ 请至少输入一个有效 URL（以 http 开头）")
+            elif not intent_input.strip():
+                st.error("❌ 请描述你想提取的内容")
+            else:
+                st.session_state.ue_urls      = url_input
+                st.session_state.ue_intent    = intent_input.strip()
+                st.session_state.ue_schema    = {}
+                st.session_state.ue_items     = []
+                st.session_state.ue_dashboard = ""
+                st.session_state.ue_log       = []
+                st.session_state.phase        = "running"
+                st.rerun()
+
+    # ══════════════════════════════════════════════
+    # 阶段二：运行流水线
+    # ══════════════════════════════════════════════
+    elif st.session_state.phase == "running":
+        urls   = [u.strip() for u in st.session_state.ue_urls.splitlines() if u.strip().startswith("http")]
+        intent = st.session_state.ue_intent
+        engine = st.session_state.ue_engine
+        preset = ENGINE_PRESETS.get(engine, {})
+
+        st.markdown(f"""
+<div style="margin-bottom:16px">
+  <div style="font-size:1.2rem;font-weight:700;color:#f1f5f9;margin-bottom:4px">
+    ⚡ 流水线运行中 · {preset.get('label','默认引擎')}
+  </div>
+  <div style="font-size:0.82rem;color:#475569">
+    {len(urls)} 个 URL · {intent[:60]}{'...' if len(intent) > 60 else ''}
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+        prog_bar  = st.progress(0, text="初始化...")
+        prog_text = st.empty()
+
+        def on_ue_progress(step, total, msg):
+            pct = int(step / total * 100)
+            prog_bar.progress(pct, text=msg)
+            prog_text.markdown(
+                f'<div style="font-size:0.80rem;color:#64748b;padding:2px 0">{msg}</div>',
+                unsafe_allow_html=True,
+            )
+
+        schema, items, dashboard_json, log = run_url_pipeline(
+            urls, intent,
+            engine=engine,
+            progress_callback=on_ue_progress,
+        )
+
+        st.session_state.ue_schema    = schema
+        st.session_state.ue_items     = items
+        st.session_state.ue_dashboard = dashboard_json
+        st.session_state.ue_log       = log
+        st.session_state.phase        = "ready"
+        st.rerun()
+
+    # ══════════════════════════════════════════════
+    # 阶段三：展示结果
+    # ══════════════════════════════════════════════
+    elif st.session_state.phase == "ready":
+        schema    = st.session_state.ue_schema
+        items     = st.session_state.ue_items
+        dashboard = st.session_state.ue_dashboard
+        intent    = st.session_state.ue_intent
+        log       = st.session_state.ue_log
+        engine    = st.session_state.ue_engine
+        preset    = ENGINE_PRESETS.get(engine, {})
+
+        # 顶部概览
+        fields     = schema.get("fields", [])
+        urls_count = len([u for u in st.session_state.ue_urls.splitlines() if u.strip().startswith("http")])
+        st.markdown(f"""
+<div class="stat-bar">
+  <div class="stat-chip">📦 提取条目 <span class="val">{len(items)}</span></div>
+  <div class="stat-chip">🌐 URL 数 <span class="val">{urls_count}</span></div>
+  <div class="stat-chip">📋 字段数 <span class="val">{len(fields)}</span></div>
+  <div class="stat-chip">🎯 对象 <span class="val">{schema.get('target_object','—')}</span></div>
+  <div class="stat-chip">⚡ 引擎 <span class="val">{preset.get('label','默认')}</span></div>
+</div>
+""", unsafe_allow_html=True)
+
+        # 推理日志
+        with st.expander("🧠 流水线执行日志", expanded=False):
+            for line in log:
+                st.markdown(f"<p style='color:#64748b;font-size:0.85rem;padding:2px 0'>{line}</p>",
+                            unsafe_allow_html=True)
+
+        # 主脑 Schema 展示
+        if fields:
+            with st.expander(f"🔧 主脑生成的字段规则（{len(fields)} 个字段）", expanded=False):
+                fcols = st.columns(3)
+                for i, f in enumerate(fields):
+                    with fcols[i % 3]:
+                        req = "✦ 必填" if f.get("required") else "选填"
+                        st.markdown(f"""
+<div style="background:rgba(15,23,42,0.7);border:1px solid rgba(99,102,241,0.18);border-radius:10px;padding:12px 14px;margin-bottom:8px">
+  <div style="font-size:0.85rem;font-weight:700;color:#a5b4fc;margin-bottom:2px">{f.get('label','')} <span style="font-size:0.68rem;color:#334155">({f.get('key','')})</span></div>
+  <div style="font-size:0.75rem;color:#475569;margin-bottom:4px">{f.get('desc','')}</div>
+  <div style="font-size:0.68rem;color:#334155">{req}</div>
+</div>""", unsafe_allow_html=True)
+
+        # Dashboard 可视化
+        if dashboard:
+            st.markdown('<div class="section-title">📊 数据看板</div>', unsafe_allow_html=True)
+            render_agg_dashboard(dashboard)
+
+        # 结构化数据表格
+        if items:
+            st.markdown('<div class="section-title">📋 结构化数据明细</div>', unsafe_allow_html=True)
+            display_keys = [k for k in items[0].keys() if not k.startswith("_")]
+
+            def _norm(v):
+                if isinstance(v, list):
+                    return "、".join(str(x) for x in v if x)
+                return v or ""
+
+            df = pd.DataFrame([{k: _norm(item.get(k)) for k in display_keys} for item in items])
+            st.dataframe(df, use_container_width=True, height=420)
+
+            csv = df.to_csv(index=False).encode("utf-8-sig")
+            c1, c2, c3 = st.columns([2, 2, 1])
+            with c1:
+                st.download_button(
+                    "⬇️ 下载 CSV",
+                    data=csv,
+                    file_name=f"extract_{intent[:20]}.csv",
+                    mime="text/csv",
+                )
+            with c2:
+                if st.button("💾 保存看板报告", use_container_width=True, type="primary"):
+                    fp = save_report(f"URL提取：{intent}", dashboard)
+                    st.success(f"✅ 已保存：{fp}")
+            with c3:
+                if st.button("🏠 首页", use_container_width=True, key="home_ue"):
+                    go_home(); st.rerun()
+        else:
+            st.warning("未能从这些 URL 中提取到结构化数据，请检查 URL 是否可访问，或调整意图描述后重试。")
+            if st.button("← 重新输入", use_container_width=True):
+                st.session_state.phase = "input"
+                st.rerun()

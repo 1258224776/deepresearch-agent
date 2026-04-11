@@ -260,6 +260,57 @@ def prompt_scrape_digest(combined_content: str, topic: str) -> str:
 - 用中文，简洁专业"""
 
 
+def prompt_orchestrate(user_intent: str) -> str:
+    """主脑 Prompt：理解用户意图，生成字段 Schema + 打工指令。"""
+    return f"""你是一位数据提取架构师。用户想从一批网页中提取特定信息，你的任务是：
+1. 理解用户意图
+2. 定义标准化的数据字段（JSON Schema）
+3. 为后续"打工 AI"生成简洁的提取指令
+
+用户意图：
+{user_intent}
+
+请严格以 JSON 格式返回，结构如下：
+{{
+  "task_summary": "用一句话描述本次提取任务",
+  "target_object": "要提取的对象（如：二手房源、竞品产品、招聘岗位）",
+  "fields": [
+    {{
+      "key": "字段英文 key（snake_case）",
+      "label": "字段中文名",
+      "desc": "提取说明（告诉打工 AI 怎么找这个字段）",
+      "required": true或false
+    }}
+  ],
+  "worker_instructions": "给打工 AI 的简洁作业指令（2-4句话），说明：提取什么、怎么判断相关条目、没找到时返回空数组",
+  "dedup_keys": ["用于去重的字段 key 列表，通常是标题+价格或标题+公司"],
+  "dashboard_hint": "给汇总 AI 的提示，说明本次数据的核心分析维度（如：重点分析价格分布和区域热度）"
+}}
+
+只返回 JSON，不要其他内容。"""
+
+
+def prompt_worker_extract(chunk: str, fields_desc: str, worker_instructions: str) -> str:
+    """打工 Prompt：从单个文本块中按 Schema 提取结构化条目。"""
+    return f"""你是一个结构化数据提取专员。
+
+作业指令：
+{worker_instructions}
+
+需要提取的字段：
+{fields_desc}
+
+以下是网页文本片段：
+{chunk}
+
+要求：
+- 找出文本中所有符合条件的条目
+- 每个条目严格按字段 key 返回 JSON 对象
+- 没有的字段填 null，不要编造数据
+- 只返回 JSON 数组（找不到任何条目时返回 []）
+- 不要任何解释文字"""
+
+
 def prompt_chat_with_report(question: str, report: str, history: str, user_msg: str) -> str:
     return f"""研究主题：{question}
 
@@ -291,12 +342,44 @@ def prompt_aggregation_report(items_md: str, question: str, total: int) -> str:
     return f"""用户问题：{question}
 
 以下是从多个网站汇总的 {total} 条数据：
-
 {items_md[:12000]}
 
-请生成一份简洁的数据分析报告，包含：
-1. 数据概况（共几条，来自哪些平台，整体特征）
-2. 关键发现（2-4条最值得关注的规律、趋势或洞察）
-3. 给用户的具体建议（可操作的 2-3 条建议）
+请生成一份结构化分析报告，严格以 JSON 格式返回，结构如下：
 
-用中文，简洁专业，重点突出数据规律。"""
+{{
+  "title": "本次汇总的简短标题（10字以内）",
+  "stats": [
+    {{"label": "统计指标名称", "value": "具体数值（含单位）", "change": "变化量如+3或-1.2K（无则填null）", "is_positive": true或false或null}}
+  ],
+  "highlights": [
+    {{"icon": "emoji", "content": "一句话核心发现，可含具体数字", "tag": "简短标签（如首次入场、持续领跑）", "color": "green或blue或orange或red"}}
+  ],
+  "top_items": [
+    {{"title": "名称/公司", "subtitle": "职位/描述/地点", "value": "价格/薪资", "tags": ["标签1", "标签2"], "is_new": true或false}}
+  ],
+  "analysis": {{
+    "metrics": [
+      {{"label": "指标名", "value": "核心数值", "sub": "补充说明"}}
+    ],
+    "distributions": [
+      {{"group": "分类维度名称", "items": [{{"label": "子类别", "count": 数量, "pct": 百分比整数}}]}}
+    ],
+    "directions": [
+      {{"name": "方向/类别名", "count": 数量, "trend": "+N或-N或持平"}}
+    ]
+  }},
+  "recommendations": [
+    {{"icon": "emoji", "title": "建议标题（10字以内）", "content": "具体可操作的建议内容，含数据支撑"}}
+  ]
+}}
+
+要求：
+- 只返回 JSON，不要任何其他内容和 markdown 代码块
+- stats：3-4 个最关键指标（总量、均价/均薪、变化、分类数等）
+- highlights：3-5 个核心发现，每条对应不同维度，颜色用于区分重要程度
+- top_items：最多 8 个最值得关注的条目，按价值/薪资/评分从高到低排序
+- analysis.metrics：3-5 个关键统计数据
+- analysis.distributions：若有明显分布规律（学历/区域/类型）则填写，否则填 []
+- analysis.directions：若有方向/类别细分则填写，否则填 []
+- recommendations：3-5 条可操作的行动建议
+- 全部用中文，数据翔实，重点突出"""

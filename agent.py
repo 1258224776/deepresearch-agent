@@ -2,17 +2,29 @@
 agent.py — LLM 调用、推理规划、内容分析核心逻辑
 """
 import json
+import random
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse
 
 from google import genai
+from google.genai import types as _genai_types
 try:
     from openai import OpenAI as _OAI
 except ImportError:
     _OAI = None
+try:
+    import anthropic as _ANT
+except ImportError:
+    _ANT = None
 
-from config import PROVIDERS, FETCH_WORKERS, SEARCH_MAX_RESULTS, SEARCH_MAX_QUERIES, load_secret
+from config import (
+    PROVIDERS, ROLE_ORDER, ENGINE_PRESETS,
+    FETCH_WORKERS, WORKER_THREADS, CHUNK_SIZE, JITTER_RANGE,
+    NETWORK_PROBE_TIMEOUT, SEARCH_MAX_RESULTS, SEARCH_MAX_QUERIES,
+    load_secret,
+)
 from prompts import (
     CHAT_SYSTEM_PROMPT,
     prompt_reason,
@@ -26,63 +38,201 @@ from prompts import (
     prompt_chat_with_report,
     prompt_extract_list,
     prompt_aggregation_report,
+    prompt_orchestrate,
+    prompt_worker_extract,
 )
 from tools import fetch_page_content, fetch_via_jina, web_search
+
+
+# ══════════════════════════════════════════════
+# JSON 强力清洗器（容错 90% 提升）
+# ══════════════════════════════════════════════
+
+def extract_json(text: str):
+    """
+    暴力从任意文本中提取第一个合法 JSON 对象或数组。
+    处理：markdown 代码块、前后废话、单引号、控制字符等。
+    """
+    if not text:
+        return None
+    text = text.strip()
+
+    # 1. 去除 markdown 代码块
+    if "```" in text:
+        parts = re.split(r"```(?:json)?", text)
+        for part in parts[1:]:
+            candidate = part.strip().split("```")[0].strip()
+            if candidate:
+                text = candidate
+                break
+
+    # 2. 直接尝试解析
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # 3. 正则暴力匹配 JSON 数组 或 对象
+    for pattern in [
+        r'(\[[\s\S]*?\])\s*$',   # 末尾数组（最宽松）
+        r'(\{[\s\S]*?\})\s*$',   # 末尾对象
+        r'(\[[\s\S]*\])',         # 任意位置数组
+        r'(\{[\s\S]*\})',         # 任意位置对象
+    ]:
+        m = re.search(pattern, text)
+        if m:
+            try:
+                return json.loads(m.group(1))
+            except Exception:
+                pass
+
+    # 4. 最后尝试：把单引号替换为双引号
+    try:
+        return json.loads(text.replace("'", '"'))
+    except Exception:
+        pass
+
+    return None
+
+
+# ══════════════════════════════════════════════
+# 网络探测：自动识别是否能访问海外 API
+# ══════════════════════════════════════════════
+
+def detect_network_mode() -> str:
+    """
+    探测是否能连通 Google API 端点。
+    返回 'overseas'（可以） 或 'domestic'（不行，需用国内通道）。
+    """
+    import socket
+    try:
+        sock = socket.create_connection(
+            ("generativelanguage.googleapis.com", 443),
+            timeout=NETWORK_PROBE_TIMEOUT,
+        )
+        sock.close()
+        return "overseas"
+    except Exception:
+        return "domestic"
 
 
 # ══════════════════════════════════════════════
 # LLM 网关：多提供商自动切换
 # ══════════════════════════════════════════════
 
-def ai_generate(prompt: str, system: str = "") -> str:
+def _call_provider(name: str, cfg: dict, prompt: str, system: str,
+                   structured: bool = False) -> str:
     """
-    按优先级依次尝试各 AI 提供商。
-    遇到 503 / 429 / 限速时自动切换到下一个。
+    调用单个提供商，返回文本结果。失败时抛出异常。
+    structured=True 时，支持的厂商会启用原生 JSON 模式。
     """
-    order_str = load_secret("AI_PROVIDER_ORDER") or "google,glm,minimax,openai"
-    order = [p.strip() for p in order_str.split(",")]
-    last_err = None
+    api_key = load_secret(cfg["env"])
+    if not api_key:
+        raise ValueError(f"API Key 未配置：{cfg['env']}")
+    model = cfg.get("model", "")
+    if not model:
+        raise ValueError(f"模型名称未配置：{name}")
 
-    for name in order:
+    ptype = cfg.get("type", "openai_compat")
+    use_json_mode = structured and cfg.get("structured_output", False)
+
+    # ── Google ──
+    if ptype == "google":
+        client = genai.Client(api_key=api_key)
+        cfg_kwargs = {}
+        if use_json_mode:
+            cfg_kwargs["response_mime_type"] = "application/json"
+        if system:
+            cfg_kwargs["system_instruction"] = system
+        gen_cfg = _genai_types.GenerateContentConfig(**cfg_kwargs) if cfg_kwargs else None
+        kwargs = {"model": model, "contents": prompt}
+        if gen_cfg:
+            kwargs["config"] = gen_cfg
+        return client.models.generate_content(**kwargs).text
+
+    # ── Anthropic ──
+    elif ptype == "anthropic":
+        if _ANT is None:
+            raise ImportError("anthropic 包未安装，请 pip install anthropic")
+        client = _ANT.Anthropic(api_key=api_key)
+        kwargs = {
+            "model":      model,
+            "max_tokens": 8192,
+            "messages":   [{"role": "user", "content": prompt}],
+        }
+        if system:
+            kwargs["system"] = system
+        resp = client.messages.create(**kwargs)
+        return resp.content[0].text
+
+    # ── OpenAI 兼容 ──
+    else:
+        if _OAI is None:
+            raise ImportError("openai 包未安装")
+        client = _OAI(api_key=api_key, base_url=cfg["base_url"])
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        extra = {"response_format": {"type": "json_object"}} if use_json_mode else {}
+        return client.chat.completions.create(
+            model=model, messages=messages, **extra
+        ).choices[0].message.content
+
+
+# 触发自动跳过的错误关键词
+_SKIP_ERRORS = (
+    "503", "UNAVAILABLE", "429", "rate_limit", "overloaded",
+    "Too Many", "quota", "500", "Internal", "model",
+    "未配置", "TODO", "ImportError", "anthropic 包", "openai 包",
+    "timed out", "ConnectionError", "ConnectTimeout",
+)
+
+
+def ai_generate(prompt: str, system: str = "",
+                _order: list[str] | None = None,
+                structured: bool = False) -> str:
+    """
+    按优先级依次尝试各 AI 提供商，遇到限速/不可用自动跳下一个。
+    structured=True：对支持的厂商启用原生 JSON 模式。
+    """
+    if _order is None:
+        order_str = load_secret("AI_PROVIDER_ORDER") or "google,glm,minimax,openai"
+        _order = [p.strip() for p in order_str.split(",")]
+
+    last_err = None
+    for name in _order:
         cfg = PROVIDERS.get(name)
         if not cfg:
             continue
-        api_key = load_secret(cfg["env"])
-        if not api_key:
-            continue
-        # openai 兼容接口需要 openai 包
-        if name != "google" and _OAI is None:
-            print(f"[AI] 跳过 {name}：openai 包未安装")
-            continue
         try:
-            if name == "google":
-                client = genai.Client(api_key=api_key)
-                return client.models.generate_content(
-                    model=cfg["model"], contents=prompt
-                ).text
-            else:
-                client = _OAI(api_key=api_key, base_url=cfg["base_url"])
-                messages = []
-                if system:
-                    messages.append({"role": "system", "content": system})
-                messages.append({"role": "user", "content": prompt})
-                return client.chat.completions.create(
-                    model=cfg["model"], messages=messages
-                ).choices[0].message.content
-
+            return _call_provider(name, cfg, prompt, system, structured=structured)
         except Exception as e:
             err_str = str(e)
             print(f"[AI] {name} 出错: {err_str[:120]}")
-            if any(x in err_str for x in ["503", "UNAVAILABLE", "429",
-                                           "rate_limit", "overloaded",
-                                           "Too Many", "quota",
-                                           "500", "Internal", "model"]):
-                print(f"[AI] {name} 暂时不可用，切换下一个提供商...")
+            if any(x in err_str for x in _SKIP_ERRORS):
+                print(f"[AI] {name} 跳过，切换下一个...")
                 last_err = e
                 continue
             raise
 
     raise RuntimeError(f"所有 AI 提供商均不可用。最后错误：{last_err}")
+
+
+def ai_generate_role(prompt: str, system: str = "",
+                     role: str = "default",
+                     engine: str = "",
+                     structured: bool = False) -> str:
+    """
+    按角色 + 引擎预设路由选择提供商列表，再调用 ai_generate。
+    engine: "deep" | "fast" | "" (空=用默认 ROLE_ORDER)
+    """
+    preset = ENGINE_PRESETS.get(engine, {})
+    order_str = preset.get(role, "") or ROLE_ORDER.get(role, "")
+    if not order_str:
+        return ai_generate(prompt, system, structured=structured)
+    order = [p.strip() for p in order_str.split(",")]
+    return ai_generate(prompt, system, _order=order, structured=structured)
 
 
 # ══════════════════════════════════════════════
@@ -249,6 +399,206 @@ def chat_with_report(question: str, report: str,
         prompt_chat_with_report(question, report, history_ctx, user_msg),
         system=CHAT_SYSTEM_PROMPT,
     )
+
+
+# ══════════════════════════════════════════════
+# URL 智能提取流水线（Orchestrator → Workers → Analyst）
+# ══════════════════════════════════════════════
+
+def orchestrate(user_intent: str, engine: str = "") -> dict:
+    """
+    主脑 AI：解析用户意图，生成字段 Schema + 打工指令。
+    启用结构化输出（支持的厂商 100% 返回合法 JSON）。
+    """
+    try:
+        text = ai_generate_role(
+            prompt_orchestrate(user_intent),
+            role="orchestrator",
+            engine=engine,
+            structured=True,       # 对 Google/支持厂商启用原生 JSON 模式
+        ).strip()
+        data = extract_json(text)
+        if data and isinstance(data, dict):
+            return data
+        raise ValueError("主脑返回内容无法解析为 dict")
+    except Exception as e:
+        print(f"[Orchestrator] 解析失败，降级到默认 Schema: {e}")
+        return {
+            "task_summary":       user_intent,
+            "target_object":      "相关条目",
+            "fields": [
+                {"key": "title", "label": "标题", "desc": "条目标题或名称", "required": True},
+                {"key": "desc",  "label": "描述", "desc": "简短描述",       "required": False},
+                {"key": "price", "label": "价格", "desc": "价格或薪资",     "required": False},
+                {"key": "url",   "label": "链接", "desc": "原始链接",       "required": False},
+            ],
+            "worker_instructions": f"从文本中提取与以下需求相关的条目：{user_intent}",
+            "dedup_keys":          ["title"],
+            "dashboard_hint":      "",
+        }
+
+
+def _smart_chunk(text: str, base_size: int = CHUNK_SIZE) -> list[str]:
+    """
+    智能切块：按段落边界切分，根据内容总长度动态调整块数上限。
+    短页面（<5000字）最多切 3 块；长页面才切更多，避免无效 API 调用。
+    """
+    total = len(text)
+    # 动态调整：内容越少，块越大，避免切出过多空块
+    size = max(base_size, total // 5) if total < base_size * 3 else base_size
+
+    paragraphs = re.split(r"\n{2,}", text)
+    chunks, buf = [], ""
+    for para in paragraphs:
+        if len(buf) + len(para) > size and buf:
+            chunks.append(buf.strip())
+            buf = para
+        else:
+            buf = (buf + "\n\n" + para) if buf else para
+    if buf.strip():
+        chunks.append(buf.strip())
+
+    # 上限兜底：不超过 8 块（防止滥用并发线程）
+    return (chunks or [text[:size]])[:8]
+
+
+def _worker_extract_chunk(args: tuple) -> list[dict]:
+    """
+    线程工作函数：对单个文本块调用打工 AI 提取结构化数据。
+    包含 Jitter 延迟（防限速）+ 强力 JSON 清洗。
+    """
+    chunk, fields_desc, worker_instructions, source_url, engine = args
+
+    # Jitter：随机微小延迟，防高并发触发 Rate Limit
+    time.sleep(random.uniform(*JITTER_RANGE))
+
+    try:
+        raw = ai_generate_role(
+            prompt_worker_extract(chunk, fields_desc, worker_instructions),
+            role="worker",
+            engine=engine,
+        )
+        data = extract_json(raw)          # 强力清洗器，容错率大幅提升
+        items = data if isinstance(data, list) else []
+        domain = urlparse(source_url).netloc
+        for item in items:
+            if not item.get("url"):
+                item["url"] = source_url
+            item["_source_domain"] = domain
+        return items
+    except Exception as e:
+        print(f"[Worker] 块提取失败: {str(e)[:80]}")
+        return []
+
+
+def run_url_pipeline(
+    urls: list[str],
+    user_intent: str,
+    engine: str = "",
+    progress_callback=None,
+) -> tuple[dict, list[dict], str, list[str]]:
+    """
+    URL 智能提取完整流水线（五步）：
+      1. 主脑 AI    → 生成 Schema + 打工指令（结构化输出）
+      2. 并发爬取   → 多线程抓取所有 URL
+      3. 智能切块   → 动态分块 + 并发打工 AI 提取（Map，含 Jitter）
+      4. 合并去重   → Python 合并所有结果（Combine）
+      5. 看板 AI    → 汇总分析，输出 Dashboard JSON（Reduce）
+
+    engine: "deep" | "fast" | "" (空=用 ROLE_ORDER 默认)
+    返回 (schema_dict, deduped_items, dashboard_json_str, reasoning_log)
+    """
+    def cb(step: int, total: int, msg: str):
+        if progress_callback:
+            progress_callback(step, total, msg)
+
+    # ── Step 1: 主脑规划 ──
+    engine_label = ENGINE_PRESETS.get(engine, {}).get("label", "默认") if engine else "默认"
+    cb(1, 10, f"🧠 主脑 AI 正在解析意图（{engine_label}）...")
+    schema  = orchestrate(user_intent, engine=engine)
+    target  = schema.get("target_object", "条目")
+    fields  = schema.get("fields", [])
+    w_instr = schema.get("worker_instructions", "")
+    dedup_k = schema.get("dedup_keys") or ["title"]
+
+    fields_desc = "\n".join(
+        f'- {f["key"]}（{f["label"]}）：{f.get("desc", "")}{"（必填）" if f.get("required") else ""}'
+        for f in fields
+    )
+    reasoning_log = [
+        f"**引擎：** {engine_label}",
+        f"**任务：** {schema.get('task_summary', user_intent)}",
+        f"**提取对象：** {target}",
+        f"**字段数：** {len(fields)} 个 — {', '.join(f['label'] for f in fields)}",
+        f"**URL 数：** {len(urls)} 个",
+    ]
+    cb(2, 10, f"✅ 规则已生成（{len(fields)} 字段），开始并发爬取 {len(urls)} 个 URL...")
+
+    # ── Step 2: 并发爬取 ──
+    raw_contents: list[tuple[str, str]] = []
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
+        fut_map = {ex.submit(fetch_via_jina, url): url for url in urls}
+        done = 0
+        for fut in as_completed(fut_map):
+            url  = fut_map[fut]
+            done += 1
+            content = fut.result() or ""
+            if len(content) > 200:
+                raw_contents.append((url, content))
+            cb(2 + int(done / len(urls) * 2), 10,
+               f"   爬取 {done}/{len(urls)}，有效页面 {len(raw_contents)} 个")
+
+    if not raw_contents:
+        return schema, [], "", reasoning_log + ["❌ 所有 URL 均无法获取内容"]
+
+    # ── Step 3: 智能切块 + 并发打工提取（Map + Jitter）──
+    all_chunks: list[tuple] = []
+    for url, content in raw_contents:
+        for chunk in _smart_chunk(content, CHUNK_SIZE):
+            all_chunks.append((chunk, fields_desc, w_instr, url, engine))
+
+    reasoning_log.append(f"**文本块：** {len(all_chunks)} 块（Jitter 限速 {JITTER_RANGE[0]}-{JITTER_RANGE[1]}s）")
+    cb(4, 10, f"📋 {len(all_chunks)} 块 × {WORKER_THREADS} 线程并发提取中（含限速保护）...")
+
+    all_items: list[dict] = []
+    completed = 0
+    with ThreadPoolExecutor(max_workers=WORKER_THREADS) as ex:
+        futs = {ex.submit(_worker_extract_chunk, args): args for args in all_chunks}
+        for fut in as_completed(futs):
+            completed += 1
+            items = fut.result() or []
+            all_items.extend(items)
+            prog = 4 + int(completed / max(len(all_chunks), 1) * 4)
+            cb(prog, 10,
+               f"   {completed}/{len(all_chunks)} 块完成，已提取 {len(all_items)} 条原始数据")
+
+    # ── Step 4: 合并去重（Combine）──
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for item in all_items:
+        key = "-".join(str(item.get(k, "")) for k in dedup_k)
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(item)
+
+    reasoning_log.append(f"**去重后：** {len(deduped)} 条（原始 {len(all_items)} 条）")
+    cb(9, 10, f"✅ 去重完成 {len(deduped)} 条，看板 AI 生成分析中...")
+
+    # ── Step 5: 看板 AI 汇总分析（Reduce）──
+    dashboard_json = ""
+    if deduped:
+        items_md   = json.dumps(deduped[:100], ensure_ascii=False)
+        hint       = schema.get("dashboard_hint", "")
+        full_intent = f"{user_intent}\n\n分析维度提示：{hint}" if hint else user_intent
+        dashboard_json = ai_generate_role(
+            prompt_aggregation_report(items_md, full_intent, len(deduped)),
+            role="analyst",
+            engine=engine,
+            structured=True,
+        )
+
+    cb(10, 10, "✅ 流水线完成")
+    return schema, deduped, dashboard_json, reasoning_log
 
 
 # ══════════════════════════════════════════════
