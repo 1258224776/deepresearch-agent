@@ -1389,7 +1389,7 @@ elif st.session_state.mode == "scrape":
                     file_name=f"data_{question[:20]}.csv",
                     mime="text/csv",
                     use_container_width=True,
-                    help="文件将保存到浏览器默认下载文件夹（通常为"下载"）",
+                    help="文件将保存到浏览器默认下载文件夹（通常为【下载】）",
                 )
         else:
             st.warning("未能提取到结构化数据，请尝试更具体的描述。")
@@ -2065,7 +2065,7 @@ elif st.session_state.mode == "url_extract":
                     file_name=f"extract_{intent[:20]}.csv",
                     mime="text/csv",
                     use_container_width=True,
-                    help="文件保存到浏览器默认下载文件夹（通常为"下载"），手机用户在文件管理器中查找",
+                    help="文件保存到浏览器默认下载文件夹（通常为【下载】），手机用户在文件管理器中查找",
                 )
             with c2:
                 if st.button("💾 保存看板报告", use_container_width=True, type="primary"):
