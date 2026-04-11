@@ -761,6 +761,7 @@ def _fetch_and_summarize(args: tuple) -> dict | None:
 def run_research(
     question: str,
     progress_callback=None,
+    timelimit: str = "",
 ) -> tuple[list[dict], str, list[str], str]:
     """
     统一入口：自动判断 research / aggregation 模式并路由。
@@ -797,7 +798,7 @@ def run_research(
     all_results: list[tuple] = []
     seen_urls: set[str] = set()
     for query in queries:
-        for r in web_search(query, max_results=SEARCH_MAX_RESULTS):
+        for r in web_search(query, max_results=SEARCH_MAX_RESULTS, timelimit=timelimit):
             url = r.get("href", "")
             if url and url not in seen_urls:
                 seen_urls.add(url)
@@ -820,9 +821,6 @@ def run_research(
             progress = 2 + int(completed / total_urls * 6)
             cb(progress, 10, f"   爬取进度 {completed}/{total_urls}，有效 {len(sources)} 个")
 
-    # Step 4: 生成综合摘要
-    cb(9, 10, f"✅ 爬取完毕，共 {len(sources)} 个有效来源，正在汇总...")
-    digest = compile_digest(sources, question) if sources else ""
-    cb(10, 10, "✅ 完成")
-
-    return sources, digest, reasoning_log, "research"
+    cb(10, 10, f"✅ 爬取完毕，共 {len(sources)} 个有效来源")
+    # digest 不再自动生成，由前端按需点击触发
+    return sources, "", reasoning_log, "research"

@@ -826,7 +826,10 @@ _defaults = {
     "ue_items":      [],          # 打工 AI 提取的结构化条目
     "ue_dashboard":  "",          # 看板 AI 生成的 Dashboard JSON
     "ue_log":        [],          # 流水线推理日志
-    "net_mode":      "",          # 网络探测结果："overseas"|"domestic"|""
+    "net_mode":          "",      # 网络探测结果："overseas"|"domestic"|""
+    "scrape_source_type": "全网综合",
+    "scrape_time_range":  "不限",
+    "scrape_report":      "",    # 按需生成的综合报告（不再自动触发）
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -1172,20 +1175,21 @@ if st.session_state.mode == "home":
 <div class="mode-card">
   <div class="mode-card-glow"></div>
   <div class="mode-icon-wrap">🔍</div>
-  <div class="mode-title">搜索 & 爬取内容</div>
-  <div class="mode-desc">输入主题，AI 从多角度搜索并抓取网页，完整呈现所有信息，你再决定是否生成报告。</div>
+  <div class="mode-title">探索与发现</div>
+  <div class="mode-desc">输入主题，选择来源类型和时间范围，AI 多角度搜索并抓取原始网页，呈现材料清单，你再决定下一步。</div>
   <div class="mode-steps">
     <span class="mode-step">① 输入主题</span>
-    <span class="mode-step">② 多角度搜索</span>
-    <span class="mode-step">③ 查看摘要</span>
+    <span class="mode-step">② 筛选来源</span>
+    <span class="mode-step">③ 查看原料</span>
     <span class="mode-step">④ 可选报告</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("开始搜索爬取 →", use_container_width=True, type="primary", key="b_scrape"):
-            st.session_state.mode = "scrape"
+        if st.button("开始探索 →", use_container_width=True, type="primary", key="b_scrape"):
+            st.session_state.mode  = "scrape"
             st.session_state.phase = "input"
+            st.session_state.scrape_report = ""
             st.rerun()
 
     with col2:
@@ -1205,7 +1209,7 @@ if st.session_state.mode == "home":
 """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("生成研究报告 →", use_container_width=True, type="primary", key="b_report"):
-            st.session_state.mode = "direct"
+            st.session_state.mode  = "direct"
             st.session_state.phase = "input"
             st.rerun()
 
@@ -1214,8 +1218,8 @@ if st.session_state.mode == "home":
 <div class="mode-card">
   <div class="mode-card-glow"></div>
   <div class="mode-icon-wrap">⚡</div>
-  <div class="mode-title">URL 智能提取</div>
-  <div class="mode-desc">粘贴任意网址 + 描述你想要什么，主脑 AI 制定规则，打工 AI 并发提取，自动生成数据看板。</div>
+  <div class="mode-title">数据清洗与提取</div>
+  <div class="mode-desc">粘贴已知网址 + 描述你想要什么，主脑 AI 制定规则，打工 AI 并发提取结构化数据，自动生成看板。</div>
   <div class="mode-steps">
     <span class="mode-step">① 贴入 URL</span>
     <span class="mode-step">② 描述意图</span>
@@ -1225,8 +1229,8 @@ if st.session_state.mode == "home":
 </div>
 """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("开始 URL 提取 →", use_container_width=True, type="primary", key="b_ue"):
-            st.session_state.mode = "url_extract"
+        if st.button("开始数据提取 →", use_container_width=True, type="primary", key="b_ue"):
+            st.session_state.mode  = "url_extract"
             st.session_state.phase = "input"
             st.rerun()
 
@@ -1272,21 +1276,46 @@ elif st.session_state.mode == "scrape":
     if st.session_state.phase == "input":
         st.markdown("""
 <div class="page-hero">
-  <div class="page-hero-title">你想<span class="accent">搜索</span>什么？</div>
-  <div class="page-hero-sub">描述你感兴趣的主题，AI 会自动判断意图、规划搜索策略并并行抓取多个网页。</div>
+  <div class="page-hero-title">🔍 <span class="accent">探索</span>与发现</div>
+  <div class="page-hero-sub">输入研究主题，选择来源类型和时间范围，AI 并行爬取后呈现原始材料清单，你再决定下一步。</div>
 </div>
 """, unsafe_allow_html=True)
 
-        # 显示本地文档提示
         if st.session_state.local_docs:
             st.info(f"📂 已加载 {len(st.session_state.local_docs)} 个本地文档，研究时将与网络资料交叉融合")
 
         with st.form("scrape_form"):
-            q = st.text_input("搜索内容", placeholder="例如：特斯拉 2025 年最新车型发布信息", label_visibility="collapsed")
-            if st.form_submit_button("🔍 开始搜索爬取", use_container_width=True, type="primary"):
-                if q.strip():
-                    st.session_state.question = q.strip()
-                    st.session_state.phase = "searching"
+            topic = st.text_input(
+                "研究主题（必填）",
+                placeholder="例如：特斯拉 2025 年新车规划",
+                label_visibility="visible",
+            )
+            col_a, col_b = st.columns(2)
+            with col_a:
+                source_type = st.selectbox(
+                    "来源类型",
+                    ["全网综合", "新闻资讯（时效优先）", "技术文档（深度优先）", "学术/论文"],
+                )
+            with col_b:
+                time_range = st.selectbox(
+                    "时间范围",
+                    ["不限", "最近24小时", "最近一周", "最近一月", "最近一年"],
+                )
+            submitted = st.form_submit_button("🔍 开始探索", use_container_width=True, type="primary")
+            if submitted:
+                if not topic.strip():
+                    st.error("❌ 请输入研究主题")
+                else:
+                    _HINT = {
+                        "新闻资讯（时效优先）": "（请侧重搜索最新新闻资讯）",
+                        "技术文档（深度优先）": "（请侧重技术文档和深度分析）",
+                        "学术/论文":           "（请侧重学术论文和研究报告）",
+                    }
+                    st.session_state.question           = topic.strip() + _HINT.get(source_type, "")
+                    st.session_state.scrape_source_type = source_type
+                    st.session_state.scrape_time_range  = time_range
+                    st.session_state.scrape_report      = ""
+                    st.session_state.phase              = "searching"
                     st.rerun()
 
     # ── 搜索中 ──
@@ -1321,7 +1350,11 @@ elif st.session_state.mode == "scrape":
                 unsafe_allow_html=True,
             )
 
-        sources, digest, log, task_mode = run_research(question, progress_callback=on_progress)
+        _TIME_MAP = {"最近24小时": "d", "最近一周": "w", "最近一月": "m", "最近一年": "y"}
+        _timelimit = _TIME_MAP.get(st.session_state.get("scrape_time_range", ""), "")
+        sources, digest, log, task_mode = run_research(
+            question, progress_callback=on_progress, timelimit=_timelimit
+        )
         prog_bar.progress(100)
         status_box.empty()
 
@@ -1408,20 +1441,22 @@ elif st.session_state.mode == "scrape":
     elif st.session_state.phase in ("sources_ready", "gen_report", "report_ready", "scrape_digest"):
         question = st.session_state.question
         sources  = st.session_state.sources
-        digest   = st.session_state.digest
 
         st.markdown(f"""
 <div style="margin-bottom:8px">
-  <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;letter-spacing:-0.01em">📄 {question}</div>
+  <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;letter-spacing:-0.01em">🔍 {question}</div>
 </div>
 """, unsafe_allow_html=True)
 
         high_cnt = sum(1 for s in sources if s.get("relevance") == "high")
+        _src_type = st.session_state.get("scrape_source_type", "全网综合")
+        _time_rng = st.session_state.get("scrape_time_range", "不限")
         st.markdown(f"""
 <div class="stat-bar">
   <div class="stat-chip">📚 来源 <span class="val">{len(sources)}</span></div>
   <div class="stat-chip">⭐ 高相关 <span class="val">{high_cnt}</span></div>
-  <div class="stat-chip">🔍 搜索角度 <span class="val">4</span></div>
+  <div class="stat-chip">🗂 {_src_type}</div>
+  <div class="stat-chip">🕐 {_time_rng}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1429,30 +1464,80 @@ elif st.session_state.mode == "scrape":
             for line in st.session_state.reasoning_log:
                 st.markdown(f"<p style='color:#64748b;font-size:0.86rem;padding:3px 0'>{line}</p>", unsafe_allow_html=True)
 
-        if digest:
-            st.markdown(f"""
-<div class="digest-card">
-  <div class="digest-label">综合内容摘要</div>
-  <div class="digest-body">{digest.replace(chr(10), '<br>')}</div>
-</div>
-""", unsafe_allow_html=True)
-
-        st.markdown(f'<div class="section-title">各来源详细内容 · {len(sources)} 个</div>', unsafe_allow_html=True)
+        # ── 操作栏（按需报告 + 导入到提取器）──
+        st.markdown(f'<div class="section-title">原始材料清单 · {len(sources)} 个来源</div>', unsafe_allow_html=True)
 
         if not sources:
             st.warning("未找到有效内容，请尝试换一个描述方式。")
         else:
             order_map = {"high": 0, "medium": 1, "low": 2}
             sorted_sources = sorted(sources, key=lambda s: order_map.get(s.get("relevance", "medium"), 1))
-            cols = st.columns(2, gap="medium")
+
+            # 操作栏
+            act1, act2, act3, _ = st.columns([2, 2, 1, 2])
+            with act1:
+                gen_report_btn = st.button("📝 生成综合分析报告", use_container_width=True, type="primary")
+            with act2:
+                transfer_btn = st.button("📊 导入已选URL到数据提取器", use_container_width=True)
+            with act3:
+                if st.button("🔍 重搜", use_container_width=True):
+                    for k in ["sources", "digest", "reasoning_log", "report", "scrape_report"]:
+                        st.session_state[k] = [] if k == "sources" else ""
+                    st.session_state.phase = "input"; st.rerun()
+
+            # 处理"导入到提取器"
+            if transfer_btn:
+                selected_urls = [
+                    sorted_sources[i]["url"]
+                    for i in range(len(sorted_sources))
+                    if st.session_state.get(f"sel_{i}", False)
+                ]
+                if selected_urls:
+                    st.session_state.ue_urls  = "\n".join(selected_urls)
+                    st.session_state.mode     = "url_extract"
+                    st.session_state.phase    = "input"
+                    st.rerun()
+                else:
+                    st.warning("请先勾选至少一个来源（卡片左侧复选框）")
+
+            # 处理"生成综合报告"
+            if gen_report_btn:
+                with st.spinner("📝 综合分析报告生成中..."):
+                    st.session_state.scrape_report = compile_digest(sources, question)
+
+            # 展示报告（如已生成）
+            if st.session_state.get("scrape_report"):
+                _rpt = st.session_state.scrape_report
+                st.markdown(f"""
+<div class="digest-card">
+  <div class="digest-label">综合分析报告</div>
+  <div class="digest-body">{_rpt.replace(chr(10), '<br>')}</div>
+</div>
+""", unsafe_allow_html=True)
+                rsc1, rsc2 = st.columns([3, 1])
+                with rsc1:
+                    if st.button("💾 保存报告", use_container_width=True, type="primary"):
+                        fp = save_report(question, _rpt)
+                        st.success(f"✅ 已保存：{fp}")
+                with rsc2:
+                    if st.button("🏠 首页", use_container_width=True, key="home_rpt"):
+                        go_home(); st.rerun()
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # 来源卡片（带复选框）
             for i, src in enumerate(sorted_sources):
                 rel = src.get("relevance", "medium")
-                with cols[i % 2]:
+                chk_col, card_col = st.columns([0.05, 0.95])
+                with chk_col:
+                    st.checkbox("", key=f"sel_{i}", label_visibility="collapsed")
+                with card_col:
                     st.markdown(f"""
 <div class="src-card">
   <div class="src-header">
     <div class="src-num">{i+1}</div>
-    <div class="src-title">{src['title']}</div>
+    <div class="src-title"><a href="{src['url']}" target="_blank" rel="noopener noreferrer"
+      style="color:inherit;text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.2)">{src['title']}</a></div>
   </div>
   <div class="src-meta">
     <span class="badge badge-{rel}">{RELEVANCE_DOT[rel]} {RELEVANCE_LABEL[rel]}</span>
@@ -1462,28 +1547,14 @@ elif st.session_state.mode == "scrape":
   <div class="src-points">{src['key_points']}</div>
 </div>
 """, unsafe_allow_html=True)
-                    with st.expander("📖 原文片段 & 链接"):
-                        st.markdown(f"[🔗 访问原页面]({src['url']})")
+                    with st.expander("📖 原文片段"):
                         st.code(src["raw_content"][:800], language=None)
 
         st.markdown("---")
+        if st.button("🏠 首页", use_container_width=False, key="home_src"):
+            go_home(); st.rerun()
 
-        if st.session_state.phase == "sources_ready":
-            # 先生成内容汇总 / 重搜 / 首页
-            c1, c2, c3 = st.columns([3, 2, 1])
-            with c1:
-                if st.button("📋 生成内容汇总", type="primary", use_container_width=True):
-                    st.session_state.phase = "scrape_digest"; st.rerun()
-            with c2:
-                if st.button("🔍 重新搜索", use_container_width=True):
-                    for k in ["sources", "digest", "reasoning_log", "report"]:
-                        st.session_state[k] = [] if k not in ("digest", "report") else ""
-                    st.session_state.phase = "input"; st.rerun()
-            with c3:
-                if st.button("🏠 首页", use_container_width=True):
-                    go_home(); st.rerun()
-
-        elif st.session_state.phase == "scrape_digest":
+        if st.session_state.phase == "scrape_digest":
             with st.spinner("📋 AI 正在生成内容汇总..."):
                 scrape_sum = generate_scrape_digest(sources, question)
             st.markdown('<div class="section-title">内容汇总报告</div>', unsafe_allow_html=True)

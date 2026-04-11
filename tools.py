@@ -140,12 +140,17 @@ def fetch_via_jina(url: str, max_chars: int = 15000) -> str:
     return fetch_page_content(url, max_chars)
 
 
-def web_search(query: str, max_results: int = 5) -> list[dict]:
-    """使用 DuckDuckGo 搜索，返回结果列表。"""
+def web_search(query: str, max_results: int = 5, timelimit: str = "") -> list[dict]:
+    """使用 DuckDuckGo 搜索，返回结果列表。
+    timelimit: "d"=24小时 / "w"=一周 / "m"=一月 / "y"=一年 / ""=不限
+    """
     results = []
     try:
         with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
+            kwargs: dict = {"max_results": max_results}
+            if timelimit:
+                kwargs["timelimit"] = timelimit
+            for r in ddgs.text(query, **kwargs):
                 results.append(r)
     except Exception:
         pass
