@@ -846,7 +846,13 @@ elif st.session_state.mode == "scrape":
             st.markdown('<div class="section-title">📋 结构化数据明细</div>', unsafe_allow_html=True)
             # 过滤掉内部字段，建 DataFrame
             display_keys = [k for k in agg_items[0].keys() if not k.startswith("_")]
-            df = pd.DataFrame([{k: (item.get(k) or "") for k in display_keys} for item in agg_items])
+
+            def _normalize(v):
+                if isinstance(v, list):
+                    return "、".join(str(x) for x in v if x)
+                return v or ""
+
+            df = pd.DataFrame([{k: _normalize(item.get(k)) for k in display_keys} for item in agg_items])
             st.dataframe(df, use_container_width=True, height=450)
 
             # 下载按钮
