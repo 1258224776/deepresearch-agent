@@ -2229,7 +2229,7 @@ elif st.session_state.mode == "agent":
             "你的问题",
             placeholder="例如：特斯拉 2024 年的核心财务指标和市场表现如何？",
             height=100,
-            key="agent_question",
+            key="agent_question_input",
         )
 
         c_run, c_adv = st.columns([3, 1])
@@ -2240,14 +2240,14 @@ elif st.session_state.mode == "agent":
                                 disabled=not question.strip())
 
         if run_btn and question.strip():
-            st.session_state.agent_question  = question.strip()
-            st.session_state.agent_max_steps = int(max_steps)
-            st.session_state.phase           = "running"
+            st.session_state.agent_question_submitted = question.strip()
+            st.session_state.agent_max_steps          = int(max_steps)
+            st.session_state.phase                    = "running"
             st.rerun()
 
     # ── 运行阶段 ──
     elif st.session_state.phase == "running":
-        question  = st.session_state.get("agent_question", "")
+        question  = st.session_state.get("agent_question_submitted", "")
         max_steps = st.session_state.get("agent_max_steps", 8)
         engine    = st.session_state.get("ue_engine", "")
 
