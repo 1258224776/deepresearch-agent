@@ -156,6 +156,7 @@ aggregation 模式下搜索词规则：
   "answer_direct": "如果 need_search 为 false，这里给出完整回答；否则留空"
 }}
 
+重要：所有字段值必须用中文（reasoning、question_type、answer_direct 等文字字段不得出现英文句子）。
 只返回 JSON，不要其他内容。"""
 
 
@@ -289,6 +290,7 @@ def prompt_orchestrate(user_intent: str) -> str:
   "dashboard_hint": "给汇总 AI 的提示，说明本次数据的核心分析维度（如：重点分析薪资分布和技术栈热度）"
 }}
 
+重要：所有文字内容（task_summary、target_object、fields 中的 label/desc、worker_instructions、negative_keywords、discrimination_criteria、dashboard_hint）必须全部用中文填写，不得出现英文句子。
 只返回 JSON，不要其他内容。"""
 
 
@@ -398,4 +400,5 @@ def prompt_aggregation_report(items_md: str, question: str, total: int) -> str:
 - analysis.distributions：若有明显分布规律（学历/区域/类型）则填写，否则填 []
 - analysis.directions：若有方向/类别细分则填写，否则填 []
 - recommendations：3-5 条可操作的行动建议
-- 全部用中文，数据翔实，重点突出"""
+- 全部用中文，数据翔实，重点突出
+- 重要：所有字段值（title、label、content、value、sub、group、name、trend 等）必须全部用中文，禁止出现英文句子或混用英文"""

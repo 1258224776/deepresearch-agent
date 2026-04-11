@@ -175,7 +175,7 @@ CHUNK_SIZE = 2000
 WORKER_THREADS = 10
 
 # ── Worker 并发限速：每次请求前随机延迟范围（秒） ──
-JITTER_RANGE = (0.2, 0.8)
+JITTER_RANGE = (0.05, 0.3)
 
 # ── 网络探测超时（秒） ──
 NETWORK_PROBE_TIMEOUT = 4

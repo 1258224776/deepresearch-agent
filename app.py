@@ -1299,15 +1299,25 @@ elif st.session_state.mode == "scrape":
 </div>
 """, unsafe_allow_html=True)
 
-        # 总进度条
-        prog_bar  = st.progress(0, text="初始化...")
-        prog_text = st.empty()
+        prog_bar    = st.progress(0)
+        status_box  = st.empty()
+        _res_log: list[str] = []
 
         def on_progress(step, total, msg):
             pct = int(step / total * 100)
-            prog_bar.progress(pct, text=msg)
-            prog_text.markdown(
-                f'<div style="font-size:0.81rem;color:#64748b;padding:2px 0">{msg}</div>',
+            prog_bar.progress(pct)
+            _res_log.append(msg)
+            lines_html = "".join(
+                f'<div style="color:{"#a5b4fc" if i == len(_res_log)-1 else "#475569"};'
+                f'font-size:0.80rem;padding:2px 0">'
+                f'{"⏳" if i == len(_res_log)-1 else "✅"} {l}</div>'
+                for i, l in enumerate(_res_log[-6:])
+            )
+            status_box.markdown(
+                f'<div style="background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.15);'
+                f'border-radius:10px;padding:12px 16px;margin:6px 0">'
+                f'<div style="font-size:0.72rem;font-weight:700;color:#334155;margin-bottom:6px">'
+                f'进度 {pct}%</div>{lines_html}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -1355,9 +1365,8 @@ elif st.session_state.mode == "scrape":
             render_agg_dashboard(digest)
 
         # 结构化数据表格
+        st.markdown('<div class="section-title">📋 结构化数据明细</div>', unsafe_allow_html=True)
         if agg_items:
-            st.markdown('<div class="section-title">📋 结构化数据明细</div>', unsafe_allow_html=True)
-            # 过滤掉内部字段，建 DataFrame
             display_keys = [k for k in agg_items[0].keys() if not k.startswith("_")]
 
             def _normalize(v):
@@ -1371,11 +1380,17 @@ elif st.session_state.mode == "scrape":
                 col_cfg["url"] = st.column_config.LinkColumn("链接", display_text="🔗 打开")
             st.dataframe(df, use_container_width=True, height=450, column_config=col_cfg)
 
-            # 下载按钮
             csv = df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("⬇️ 下载 CSV", data=csv,
-                               file_name=f"data_{question[:20]}.csv",
-                               mime="text/csv")
+            dl_col, _ = st.columns([1, 3])
+            with dl_col:
+                st.download_button(
+                    "⬇️ 下载 CSV",
+                    data=csv,
+                    file_name=f"data_{question[:20]}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    help="文件将保存到浏览器默认下载文件夹（通常为"下载"）",
+                )
         else:
             st.warning("未能提取到结构化数据，请尝试更具体的描述。")
 
@@ -1940,14 +1955,25 @@ elif st.session_state.mode == "url_extract":
 </div>
 """, unsafe_allow_html=True)
 
-        prog_bar  = st.progress(0, text="初始化...")
-        prog_text = st.empty()
+        prog_bar    = st.progress(0)
+        status_box  = st.empty()
+        _ue_log: list[str] = []
 
         def on_ue_progress(step, total, msg):
             pct = int(step / total * 100)
-            prog_bar.progress(pct, text=msg)
-            prog_text.markdown(
-                f'<div style="font-size:0.80rem;color:#64748b;padding:2px 0">{msg}</div>',
+            prog_bar.progress(pct)
+            _ue_log.append(msg)
+            lines_html = "".join(
+                f'<div style="color:{"#a5b4fc" if i == len(_ue_log)-1 else "#475569"};'
+                f'font-size:0.80rem;padding:2px 0">'
+                f'{"⏳" if i == len(_ue_log)-1 else "✅"} {l}</div>'
+                for i, l in enumerate(_ue_log[-6:])
+            )
+            status_box.markdown(
+                f'<div style="background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.15);'
+                f'border-radius:10px;padding:12px 16px;margin:6px 0">'
+                f'<div style="font-size:0.72rem;font-weight:700;color:#334155;margin-bottom:6px">'
+                f'进度 {pct}%</div>{lines_html}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -2015,8 +2041,8 @@ elif st.session_state.mode == "url_extract":
             render_agg_dashboard(dashboard)
 
         # 结构化数据表格
+        st.markdown('<div class="section-title">📋 结构化数据明细</div>', unsafe_allow_html=True)
         if items:
-            st.markdown('<div class="section-title">📋 结构化数据明细</div>', unsafe_allow_html=True)
             display_keys = [k for k in items[0].keys() if not k.startswith("_")]
 
             def _norm(v):
@@ -2038,6 +2064,8 @@ elif st.session_state.mode == "url_extract":
                     data=csv,
                     file_name=f"extract_{intent[:20]}.csv",
                     mime="text/csv",
+                    use_container_width=True,
+                    help="文件保存到浏览器默认下载文件夹（通常为"下载"），手机用户在文件管理器中查找",
                 )
             with c2:
                 if st.button("💾 保存看板报告", use_container_width=True, type="primary"):
@@ -2047,7 +2075,12 @@ elif st.session_state.mode == "url_extract":
                 if st.button("🏠 首页", use_container_width=True, key="home_ue"):
                     go_home(); st.rerun()
         else:
-            st.warning("未能从这些 URL 中提取到结构化数据，请检查 URL 是否可访问，或调整意图描述后重试。")
-            if st.button("← 重新输入", use_container_width=True):
-                st.session_state.phase = "input"
-                st.rerun()
+            st.warning("未能提取到结构化数据，请检查 URL 是否可访问，或调整意图描述后重试。")
+            c_retry, c_home = st.columns([2, 1])
+            with c_retry:
+                if st.button("← 重新输入", use_container_width=True):
+                    st.session_state.phase = "input"
+                    st.rerun()
+            with c_home:
+                if st.button("🏠 首页", use_container_width=True, key="home_ue_empty"):
+                    go_home(); st.rerun()

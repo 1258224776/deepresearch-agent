@@ -549,16 +549,35 @@ def run_url_pipeline(
         if progress_callback:
             progress_callback(step, total, msg)
 
-    # ── Step 1: 主脑规划 ──
+    # ── Step 1+2 并行：主脑解析 & 并发爬取同时启动（核心提速）──
     engine_label = ENGINE_PRESETS.get(engine, {}).get("label", "默认") if engine else "默认"
-    cb(1, 10, f"🧠 主脑 AI 正在解析意图（{engine_label}）...")
-    schema      = orchestrate(user_intent, engine=engine)
-    target      = schema.get("target_object", "条目")
-    fields      = schema.get("fields", [])
-    w_instr     = schema.get("worker_instructions", "")
-    dedup_k     = schema.get("dedup_keys") or ["title"]
-    neg_kws     = schema.get("negative_keywords") or []
-    disc_crit   = schema.get("discrimination_criteria", "")
+    cb(1, 10, f"🧠 主脑解析意图 + 🌐 并发爬取同步启动（{engine_label}）...")
+
+    raw_contents: list[tuple[str, str]] = []
+    schema: dict = {}
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS + 1) as ex:
+        orch_fut  = ex.submit(orchestrate, user_intent, engine)
+        fetch_map = {ex.submit(fetch_via_jina, url): url for url in urls}
+
+        done = 0
+        for fut in as_completed(fetch_map):
+            url     = fetch_map[fut]
+            done   += 1
+            content = fut.result() or ""
+            if len(content) > 200:
+                raw_contents.append((url, content))
+            cb(1 + int(done / len(urls) * 3), 10,
+               f"   🌐 页面 {done}/{len(urls)} 爬取完毕，有效 {len(raw_contents)} 个（主脑思考中...）")
+
+        cb(4, 10, "⏳ 等待主脑 Schema 就绪...")
+        schema = orch_fut.result()
+
+    target    = schema.get("target_object", "条目")
+    fields    = schema.get("fields", [])
+    w_instr   = schema.get("worker_instructions", "")
+    dedup_k   = schema.get("dedup_keys") or ["title"]
+    neg_kws   = schema.get("negative_keywords") or []
+    disc_crit = schema.get("discrimination_criteria", "")
 
     fields_desc = "\n".join(
         f'- {f["key"]}（{f["label"]}）：{f.get("desc", "")}{"（必填）" if f.get("required") else ""}'
@@ -569,23 +588,8 @@ def run_url_pipeline(
         f"**任务：** {schema.get('task_summary', user_intent)}",
         f"**提取对象：** {target}",
         f"**字段数：** {len(fields)} 个 — {', '.join(f['label'] for f in fields)}",
-        f"**URL 数：** {len(urls)} 个",
+        f"**URL 数：** {len(urls)} 个 · 有效爬取 {len(raw_contents)} 个",
     ]
-    cb(2, 10, f"✅ 规则已生成（{len(fields)} 字段），开始并发爬取 {len(urls)} 个 URL...")
-
-    # ── Step 2: 并发爬取 ──
-    raw_contents: list[tuple[str, str]] = []
-    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
-        fut_map = {ex.submit(fetch_via_jina, url): url for url in urls}
-        done = 0
-        for fut in as_completed(fut_map):
-            url  = fut_map[fut]
-            done += 1
-            content = fut.result() or ""
-            if len(content) > 200:
-                raw_contents.append((url, content))
-            cb(2 + int(done / len(urls) * 2), 10,
-               f"   爬取 {done}/{len(urls)}，有效页面 {len(raw_contents)} 个")
 
     if not raw_contents:
         return schema, [], "", reasoning_log + ["❌ 所有 URL 均无法获取内容"]
@@ -597,8 +601,8 @@ def run_url_pipeline(
         for chunk in _smart_chunk(clean, CHUNK_SIZE):
             all_chunks.append((chunk, fields_desc, w_instr, url, engine, neg_kws, disc_crit))
 
-    reasoning_log.append(f"**文本块：** {len(all_chunks)} 块（Jitter 限速 {JITTER_RANGE[0]}-{JITTER_RANGE[1]}s）")
-    cb(4, 10, f"📋 {len(all_chunks)} 块 × {WORKER_THREADS} 线程并发提取中（含限速保护）...")
+    reasoning_log.append(f"**文本块：** {len(all_chunks)} 块（{WORKER_THREADS} 线程并发）")
+    cb(4, 10, f"🤖 打工 AI 提取中：{len(all_chunks)} 块 × {WORKER_THREADS} 线程并发...")
 
     all_items: list[dict] = []
     completed = 0
@@ -610,7 +614,7 @@ def run_url_pipeline(
             all_items.extend(items)
             prog = 4 + int(completed / max(len(all_chunks), 1) * 4)
             cb(prog, 10,
-               f"   {completed}/{len(all_chunks)} 块完成，已提取 {len(all_items)} 条原始数据")
+               f"   🤖 {completed}/{len(all_chunks)} 块完成，累计提取 {len(all_items)} 条数据")
 
     # ── Step 4: 合并去重（Combine）──
     seen: set[str] = set()
@@ -622,7 +626,7 @@ def run_url_pipeline(
             deduped.append(item)
 
     reasoning_log.append(f"**去重后：** {len(deduped)} 条（原始 {len(all_items)} 条）")
-    cb(9, 10, f"✅ 去重完成 {len(deduped)} 条，看板 AI 生成分析中...")
+    cb(9, 10, f"📊 去重后 {len(deduped)} 条，看板 AI 正在生成分析报告...")
 
     # ── Step 5: 看板 AI 汇总分析（Reduce）──
     dashboard_json = ""
