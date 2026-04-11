@@ -744,26 +744,6 @@ elif st.session_state.mode == "scrape":
 </div>
 """, unsafe_allow_html=True)
 
-        # 模板选择
-        st.markdown('<div style="font-size:0.8rem;color:#475569;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">选择报告模板</div>', unsafe_allow_html=True)
-        tcols = st.columns(3)
-        tkeys = list(TEMPLATES.keys())
-        for i, tk in enumerate(tkeys):
-            with tcols[i % 3]:
-                tpl = TEMPLATES[tk]
-                is_sel = st.session_state.template == tk
-                border = "rgba(99,102,241,0.6)" if is_sel else "rgba(255,255,255,0.07)"
-                bg = "rgba(99,102,241,0.10)" if is_sel else "rgba(255,255,255,0.02)"
-                st.markdown(f"""
-<div style="background:{bg};border:1px solid {border};border-radius:12px;padding:14px 16px;margin-bottom:10px;cursor:pointer">
-  <div style="font-size:0.88rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">{tpl['label']}</div>
-  <div style="font-size:0.75rem;color:#475569">{tpl['desc']}</div>
-</div>""", unsafe_allow_html=True)
-                if st.button("选择" if not is_sel else "✓ 已选", key=f"tpl_s_{tk}", use_container_width=True):
-                    st.session_state.template = tk
-                    st.rerun()
-
-        st.markdown("<br>", unsafe_allow_html=True)
         # 显示本地文档提示
         if st.session_state.local_docs:
             st.info(f"📂 已加载 {len(st.session_state.local_docs)} 个本地文档，研究时将与网络资料交叉融合")
@@ -938,19 +918,17 @@ elif st.session_state.mode == "scrape":
         st.markdown("---")
 
         if st.session_state.phase == "sources_ready":
-            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+            # 先生成内容汇总 / 重搜 / 首页
+            c1, c2, c3 = st.columns([3, 2, 1])
             with c1:
-                if st.button("📝 生成研究报告", type="primary", use_container_width=True):
-                    st.session_state.phase = "gen_report"; st.rerun()
-            with c2:
-                if st.button("📋 生成内容汇总", use_container_width=True):
+                if st.button("📋 生成内容汇总", type="primary", use_container_width=True):
                     st.session_state.phase = "scrape_digest"; st.rerun()
-            with c3:
+            with c2:
                 if st.button("🔍 重新搜索", use_container_width=True):
                     for k in ["sources", "digest", "reasoning_log", "report"]:
                         st.session_state[k] = [] if k not in ("digest", "report") else ""
                     st.session_state.phase = "input"; st.rerun()
-            with c4:
+            with c3:
                 if st.button("🏠 首页", use_container_width=True):
                     go_home(); st.rerun()
 
@@ -961,17 +939,37 @@ elif st.session_state.mode == "scrape":
             st.markdown('<div class="report-wrap">', unsafe_allow_html=True)
             st.markdown(scrape_sum)
             st.markdown('</div>', unsafe_allow_html=True)
-            sc1, sc2, sc3 = st.columns([2, 2, 1])
+
+            # 保存 / 首页
+            sc1, sc2 = st.columns([3, 1])
             with sc1:
                 if st.button("💾 保存汇总", type="primary", use_container_width=True):
                     fp = save_report(f"爬取汇总：{question}", scrape_sum)
                     st.success(f"✅ 已保存：{fp}")
             with sc2:
-                if st.button("📝 继续生成研究报告", use_container_width=True):
-                    st.session_state.phase = "gen_report"; st.rerun()
-            with sc3:
                 if st.button("🏠 首页", use_container_width=True, key="home_sd"):
                     go_home(); st.rerun()
+
+            # 模板选择 → 生成深度报告
+            st.markdown("---")
+            st.markdown('<div style="font-size:0.85rem;color:#94a3b8;font-weight:600;margin-bottom:12px">需要进一步生成深度报告？选择一个报告模板：</div>', unsafe_allow_html=True)
+            tkeys = list(TEMPLATES.keys())
+            tcols = st.columns(3)
+            for i, tk in enumerate(tkeys):
+                with tcols[i % 3]:
+                    tpl = TEMPLATES[tk]
+                    is_sel = st.session_state.template == tk
+                    border = "rgba(99,102,241,0.6)" if is_sel else "rgba(255,255,255,0.07)"
+                    bg = "rgba(99,102,241,0.10)" if is_sel else "rgba(255,255,255,0.02)"
+                    st.markdown(f"""
+<div style="background:{bg};border:1px solid {border};border-radius:10px;padding:12px 14px;margin-bottom:8px">
+  <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0;margin-bottom:3px">{tpl['label']}</div>
+  <div style="font-size:0.72rem;color:#475569">{tpl['desc']}</div>
+</div>""", unsafe_allow_html=True)
+                    if st.button("选择" if not is_sel else "✓ 已选", key=f"tpl_sd_{tk}", use_container_width=True):
+                        st.session_state.template = tk; st.rerun()
+            if st.button("📝 生成深度研究报告", use_container_width=True):
+                st.session_state.phase = "gen_report"; st.rerun()
 
         elif st.session_state.phase == "gen_report":
             tpl_sys = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["system"]
