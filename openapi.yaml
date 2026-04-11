@@ -1,0 +1,59 @@
+openapi: 3.1.0
+info:
+  title: DeepResearch Agent API
+  description: AI 深度研究 Agent：自动搜索、爬取、RAG 检索，多步推理后输出完整研究报告。
+  version: 1.0.0
+servers:
+  - url: https://你的ngrok地址.ngrok-free.app
+    description: 本地服务（通过 ngrok 暴露）
+paths:
+  /run:
+    post:
+      operationId: runDeepResearchAgent
+      summary: 运行 DeepResearch Agent
+      description: >
+        输入研究问题，Agent 自主决策调用搜索、爬取、RAG 检索等工具，
+        多步推理后返回完整的 Markdown 格式研究报告及每步思考过程。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - question
+              properties:
+                question:
+                  type: string
+                  description: 研究问题，例如：特斯拉 2024 年的核心财务指标是什么？
+                engine:
+                  type: string
+                  description: "引擎模式：deep（全球最强模型，需 VPN）| fast（国内直连）| 空字符串（自动）"
+                  default: ""
+                  enum: ["", "deep", "fast"]
+                max_steps:
+                  type: integer
+                  description: Agent 最大推理步数，默认 8
+                  default: 8
+                  minimum: 3
+                  maximum: 15
+      responses:
+        "200":
+          description: 成功返回研究报告
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  answer:
+                    type: string
+                    description: 最终研究报告（Markdown 格式）
+                  step_count:
+                    type: integer
+                    description: 实际执行步数
+                  error:
+                    type: string
+                    nullable: true
+                    description: 如有错误，此处返回详情
+        "400":
+          description: 请求参数错误
