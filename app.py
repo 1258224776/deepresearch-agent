@@ -1322,8 +1322,8 @@ elif st.session_state.mode == "scrape":
             )
 
         sources, digest, log, task_mode = run_research(question, progress_callback=on_progress)
-        prog_bar.progress(100, text="✅ 完成")
-        prog_text.empty()
+        prog_bar.progress(100)
+        status_box.empty()
 
         st.session_state.task_mode     = task_mode
         st.session_state.sources       = sources
