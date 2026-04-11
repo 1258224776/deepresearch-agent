@@ -1180,7 +1180,7 @@ if st.session_state.mode == "home":
                 
 """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3, gap="large")
+    col1, col2, col3, col4 = st.columns(4, gap="large")
 
     with col1:
         st.markdown("""
@@ -1243,6 +1243,27 @@ if st.session_state.mode == "home":
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("开始数据提取 →", use_container_width=True, type="primary", key="b_ue"):
             st.session_state.mode  = "url_extract"
+            st.session_state.phase = "input"
+            st.rerun()
+
+    with col4:
+        st.markdown("""
+<div class="mode-card">
+  <div class="mode-card-glow"></div>
+  <div class="mode-icon-wrap">🤖</div>
+  <div class="mode-title">Agent 自主模式</div>
+  <div class="mode-desc">输入问题，AI 自主决策：搜索、爬取、检索本地文档……反复推理直到找到答案，全程可见每步思考过程。</div>
+  <div class="mode-steps">
+    <span class="mode-step">① 输入问题</span>
+    <span class="mode-step">② 自主调用工具</span>
+    <span class="mode-step">③ 逐步推理</span>
+    <span class="mode-step">④ 输出报告</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("启动 Agent →", use_container_width=True, type="primary", key="b_agent"):
+            st.session_state.mode  = "agent"
             st.session_state.phase = "input"
             st.rerun()
 
@@ -2178,3 +2199,114 @@ elif st.session_state.mode == "url_extract":
             with c_home:
                 if st.button("🏠 首页", use_container_width=True, key="home_ue_empty"):
                     go_home(); st.rerun()
+
+
+# ══════════════════════════════════════════════
+# 模式四：Agent 自主模式
+# ══════════════════════════════════════════════
+elif st.session_state.mode == "agent":
+    from agent_loop import run_agent, TOOLS as AGENT_TOOLS
+
+    # ── 顶部导航栏 ──
+    st.markdown("""
+<div class="topbar-wrap">
+  <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
+  <div class="topbar-crumb-new">
+    首页 <span class="sep">›</span> <span class="cur">🤖 Agent 自主模式</span>
+  </div>
+  <div></div>
+</div>
+""", unsafe_allow_html=True)
+    if st.button("← 返回首页", key="back_agent"):
+        go_home(); st.rerun()
+
+    # ── 输入阶段 ──
+    if st.session_state.phase == "input":
+        st.markdown("### 🤖 Agent 自主模式")
+        st.caption("输入你的问题，Agent 会自主规划：搜索、爬取网页、检索本地文档……逐步推理，直到给出完整答案。")
+
+        question = st.text_area(
+            "你的问题",
+            placeholder="例如：特斯拉 2024 年的核心财务指标和市场表现如何？",
+            height=100,
+            key="agent_question",
+        )
+
+        c_run, c_adv = st.columns([3, 1])
+        with c_adv:
+            max_steps = st.number_input("最大步数", min_value=3, max_value=15, value=8, step=1)
+        with c_run:
+            run_btn = st.button("🚀 启动 Agent", use_container_width=True, type="primary",
+                                disabled=not question.strip())
+
+        if run_btn and question.strip():
+            st.session_state.agent_question  = question.strip()
+            st.session_state.agent_max_steps = int(max_steps)
+            st.session_state.phase           = "running"
+            st.rerun()
+
+    # ── 运行阶段 ──
+    elif st.session_state.phase == "running":
+        question  = st.session_state.get("agent_question", "")
+        max_steps = st.session_state.get("agent_max_steps", 8)
+        engine    = st.session_state.get("ue_engine", "")
+
+        st.markdown(f"### 🤖 Agent 正在处理：{question}")
+
+        status_box  = st.empty()
+        steps_area  = st.container()
+        step_widgets: list = []
+
+        def _progress(msg: str):
+            status_box.info(f"⏳ {msg}")
+
+        with st.spinner("Agent 推理中，请稍候…"):
+            result = run_agent(
+                question=question,
+                engine=engine,
+                max_steps=max_steps,
+                progress_callback=_progress,
+            )
+
+        status_box.empty()
+
+        # ── 展示每步过程 ──
+        steps = result.get("steps", [])
+        if steps:
+            st.markdown("#### 推理步骤")
+            for i, step in enumerate(steps, 1):
+                tool_icon = {
+                    "search":       "🔍",
+                    "scrape":       "🌐",
+                    "rag_retrieve": "📂",
+                    "finish":       "🏁",
+                }.get(step.get("tool", ""), "🔧")
+                label = f"{tool_icon} 步骤 {i}：{step.get('tool', '')}({step.get('args', {})})"
+                with st.expander(label, expanded=False):
+                    st.markdown(f"**💭 思考**\n\n{step.get('thought', '')}")
+                    obs = step.get("observation", "")
+                    if obs and obs != "(任务完成)":
+                        st.markdown("**👁️ 观察结果**")
+                        st.text(obs[:1500] + ("…" if len(obs) > 1500 else ""))
+
+        # ── 最终答案 ──
+        st.divider()
+        st.markdown("#### 📋 最终答案")
+        answer = result.get("answer", "")
+        st.markdown(answer)
+
+        # ── 操作按钮 ──
+        st.divider()
+        cb1, cb2, cb3 = st.columns(3)
+        with cb1:
+            if st.button("💾 保存报告", use_container_width=True, type="primary"):
+                from tools import save_report
+                fp = save_report(question, answer)
+                st.success(f"✅ 已保存：{fp}")
+        with cb2:
+            if st.button("🔄 重新提问", use_container_width=True):
+                st.session_state.phase = "input"
+                st.rerun()
+        with cb3:
+            if st.button("🏠 返回首页", use_container_width=True):
+                go_home(); st.rerun()

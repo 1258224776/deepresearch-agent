@@ -421,3 +421,41 @@ def prompt_aggregation_report(items_md: str, question: str, total: int) -> str:
 - recommendations：3-5 条可操作的行动建议
 - 全部用中文，数据翔实，重点突出
 - 重要：所有字段值（title、label、content、value、sub、group、name、trend 等）必须全部用中文，禁止出现英文句子或混用英文"""
+
+
+# ══════════════════════════════════════════════
+# ReAct Agent 系统提示
+# ══════════════════════════════════════════════
+
+def prompt_react_system(tools: dict | None = None) -> str:
+    """ReAct Agent 的系统提示，tools 为工具注册表 dict（可选，不传则用默认工具说明）"""
+    if tools:
+        tool_lines = "\n".join(
+            f'  - "{name}": {info["desc"]}，参数：{info["args"]}'
+            for name, info in tools.items()
+        )
+    else:
+        tool_lines = (
+            '  - "search": 搜索网络，参数：["query"]\n'
+            '  - "scrape": 爬取指定 URL 的完整正文内容，参数：["url"]\n'
+            '  - "rag_retrieve": 从用户已上传的本地文档中语义检索，参数：["query"]\n'
+            '  - "finish": 信息已足够，输出最终答案，参数：["answer"]'
+        )
+    return f"""你是一个 ReAct（推理+行动）Agent。你的工作方式是：反复思考 → 调用工具 → 观察结果 → 再思考，直到你认为信息足够，再输出最终答案。
+
+## 可用工具
+{tool_lines}
+
+## 输出格式（严格遵守）
+每次只输出一个 JSON 对象，不要有任何其他内容、解释或 markdown 代码块：
+{{"thought": "你的推理过程，解释为什么选择这个工具和参数", "tool": "工具名", "args": {{"参数名": "参数值"}}}}
+
+当你认为已收集到足够信息时，调用 finish：
+{{"thought": "信息已充足，整理答案", "tool": "finish", "args": {{"answer": "完整的最终答案（Markdown 格式）"}}}}
+
+## 注意事项
+- 每次只输出一个 JSON，不要一次输出多步
+- thought 字段要真实反映你的推理逻辑
+- 优先搜索再爬取，不要重复搜索相同关键词
+- 如果用户上传了文档，优先使用 rag_retrieve 检索本地内容
+- 最终答案（answer）要完整、结构清晰，使用 Markdown 格式"""
