@@ -24,8 +24,10 @@ from prompts import (
     prompt_generate_sub_queries,
     prompt_scrape_digest,
     prompt_chat_with_report,
+    prompt_extract_list,
+    prompt_aggregation_report,
 )
-from tools import fetch_page_content, web_search
+from tools import fetch_page_content, fetch_via_jina, web_search
 
 
 # ══════════════════════════════════════════════
@@ -90,7 +92,8 @@ def ai_generate(prompt: str, system: str = "") -> str:
 def reason(question: str) -> dict:
     """
     AI 先分析问题，输出结构化搜索计划。
-    返回字段：question_type, need_search, reasoning, search_queries, answer_direct
+    返回字段：task_mode, question_type, need_search, reasoning,
+              search_queries, target_item, max_pages, answer_direct
     """
     try:
         text = ai_generate(prompt_reason(question)).strip()
@@ -99,10 +102,13 @@ def reason(question: str) -> dict:
         return json.loads(text)
     except Exception:
         return {
+            "task_mode":     "research",
             "question_type": "深度研究",
-            "need_search": True,
-            "reasoning": "（推理解析失败，默认执行搜索）",
+            "need_search":   True,
+            "reasoning":     "（推理解析失败，默认执行搜索）",
             "search_queries": [question],
+            "target_item":   "",
+            "max_pages":     5,
             "answer_direct": "",
         }
 
@@ -189,6 +195,40 @@ def cross_validate(sources: list[dict], question: str) -> dict:
         }
 
 
+def extract_list_data(page_content: str, target_item: str) -> list[dict]:
+    """
+    从列表页提取结构化 JSON 数组（Map 阶段）。
+    用快速模型把杂乱网页变成整齐的数组。
+    """
+    try:
+        text = ai_generate(prompt_extract_list(page_content, target_item)).strip()
+        if "```" in text:
+            text = re.split(r"```(?:json)?", text)[1].strip().rstrip("`").strip()
+        data = json.loads(text)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _fetch_and_extract(args: tuple) -> list[dict]:
+    """线程工作函数：抓取列表页并提取结构化数据（aggregation 模式）。"""
+    r, target_item = args
+    url = r.get("href", "")
+    if not url:
+        return []
+    content = fetch_via_jina(url)
+    if not content or len(content) < 100:
+        return []
+    items = extract_list_data(content, target_item)
+    # 补充来源 URL
+    domain = urlparse(url).netloc
+    for item in items:
+        if not item.get("url"):
+            item["url"] = url
+        item["_source_domain"] = domain
+    return items
+
+
 def generate_scrape_digest(sources: list[dict], topic: str) -> str:
     """对爬取结果生成内容汇总报告。"""
     combined = "\n\n".join([
@@ -212,7 +252,93 @@ def chat_with_report(question: str, report: str,
 
 
 # ══════════════════════════════════════════════
-# 并行研究流程
+# 数据汇总流程（aggregation 模式）
+# ══════════════════════════════════════════════
+
+def run_aggregation(
+    question: str,
+    plan: dict,
+    progress_callback=None,
+) -> tuple[list[dict], str, list[str]]:
+    """
+    数据挖掘模式（Map-Reduce）：
+      Map    — 并发抓取列表页，AI 提取结构化 JSON 数组
+      Combine — Python 合并去重
+      Reduce  — AI 生成数据分析报告
+
+    返回 (all_items, report, reasoning_log)
+    """
+    def cb(step, total, msg):
+        if progress_callback:
+            progress_callback(step, total, msg)
+
+    # 预热 secrets
+    for _cfg in PROVIDERS.values():
+        load_secret(_cfg["env"])
+    load_secret("AI_PROVIDER_ORDER")
+
+    queries     = (plan.get("search_queries") or [question])[:SEARCH_MAX_QUERIES]
+    target_item = plan.get("target_item") or "相关条目"
+    max_pages   = min(int(plan.get("max_pages") or 5), 20)
+
+    reasoning_log = [
+        f"**模式：** 🔍 数据汇总（Aggregation）",
+        f"**目标对象：** {target_item}",
+        f"**分析：** {plan.get('reasoning', '')}",
+        f"**搜索角度（{len(queries)} 个）：** {' · '.join(queries)}",
+    ]
+
+    cb(1, 10, f"🔎 定向搜索 {len(queries)} 个平台...")
+    all_results: list[tuple] = []
+    seen_urls: set[str] = set()
+    for query in queries:
+        for r in web_search(query, max_results=max_pages):
+            url = r.get("href", "")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                all_results.append((r, target_item))
+
+    total_urls = len(all_results)
+    cb(2, 10, f"📋 共 {total_urls} 个列表页，并发提取结构化数据...")
+
+    # Map：并发抓取 + 提取
+    all_items: list[dict] = []
+    completed = 0
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as executor:
+        futures = {executor.submit(_fetch_and_extract, args): args
+                   for args in all_results}
+        for future in as_completed(futures):
+            completed += 1
+            items = future.result() or []
+            all_items.extend(items)
+            progress = 2 + int(completed / max(total_urls, 1) * 6)
+            cb(progress, 10, f"   进度 {completed}/{total_urls}，已提取 {len(all_items)} 条")
+
+    # Combine：Python 去重（按 title+company 去重）
+    seen_keys: set[str] = set()
+    deduped: list[dict] = []
+    for item in all_items:
+        key = f"{item.get('title','')}-{item.get('company','')}"
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            deduped.append(item)
+
+    cb(9, 10, f"✅ 共 {len(deduped)} 条去重数据，AI 正在生成分析报告...")
+
+    # Reduce：AI 生成汇总报告
+    if deduped:
+        import json as _json
+        items_md = _json.dumps(deduped[:80], ensure_ascii=False, indent=None)
+        report = ai_generate(prompt_aggregation_report(items_md, question, len(deduped)))
+    else:
+        report = "未能从搜索结果中提取到结构化数据，请尝试换一个更具体的描述。"
+
+    cb(10, 10, "✅ 完成")
+    return deduped, report, reasoning_log
+
+
+# ══════════════════════════════════════════════
+# 并行研究流程（research 模式）
 # ══════════════════════════════════════════════
 
 def _fetch_and_summarize(args: tuple) -> dict | None:
@@ -241,15 +367,12 @@ def _fetch_and_summarize(args: tuple) -> dict | None:
 def run_research(
     question: str,
     progress_callback=None,
-) -> tuple[list[dict], str, list[str]]:
+) -> tuple[list[dict], str, list[str], str]:
     """
-    完整研究流程（支持并行爬取）：
-      1. AI 推理规划搜索角度
-      2. 并行搜索 + 爬取 + 摘要
-      3. 生成综合摘要
+    统一入口：自动判断 research / aggregation 模式并路由。
 
     progress_callback(step: int, total: int, msg: str) — 可选进度回调
-    返回 (sources, digest, reasoning_log)
+    返回 (sources_or_items, digest_or_report, reasoning_log, task_mode)
     """
     def cb(step, total, msg):
         if progress_callback:
@@ -260,11 +383,17 @@ def run_research(
         load_secret(_cfg["env"])
     load_secret("AI_PROVIDER_ORDER")
 
-    # Step 1: 推理规划
-    cb(0, 10, "🧠 分析主题，规划搜索角度...")
+    # Step 1: 推理规划 + 模式路由
+    cb(0, 10, "🧠 分析意图，判断任务模式...")
     plan = reason(question)
+
+    if plan.get("task_mode") == "aggregation":
+        items, report, log = run_aggregation(question, plan, progress_callback)
+        return items, report, log, "aggregation"
+
     queries = (plan.get("search_queries") or [question])[:SEARCH_MAX_QUERIES]
     reasoning_log = [
+        f"**模式：** 📖 深度研究（Research）",
         f"**分析：** {plan.get('reasoning', '')}",
         f"**搜索角度（{len(queries)} 个）：** {' · '.join(queries)}",
     ]
@@ -302,4 +431,4 @@ def run_research(
     digest = compile_digest(sources, question) if sources else ""
     cb(10, 10, "✅ 完成")
 
-    return sources, digest, reasoning_log
+    return sources, digest, reasoning_log, "research"

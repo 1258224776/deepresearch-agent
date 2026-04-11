@@ -554,6 +554,8 @@ _defaults = {
     "chat_history":  [],
     "validation":    {},
     "local_docs":    [],   # [{name, content}]
+    "task_mode":     "research",  # "research" 或 "aggregation"
+    "agg_items":     [],          # aggregation 模式下提取的结构化数据
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -796,17 +798,76 @@ elif st.session_state.mode == "scrape":
                 unsafe_allow_html=True,
             )
 
-        sources, digest, log = run_research(question, progress_callback=on_progress)
+        sources, digest, log, task_mode = run_research(question, progress_callback=on_progress)
         prog_bar.progress(100, text="✅ 完成")
         prog_text.empty()
 
+        st.session_state.task_mode     = task_mode
         st.session_state.sources       = sources
         st.session_state.reasoning_log = log
         st.session_state.digest        = digest
+        if task_mode == "aggregation":
+            st.session_state.agg_items = sources  # sources 里存的是结构化 items
         st.session_state.phase         = "sources_ready"
         st.rerun()
 
-    # ── 展示结果 ──
+    # ── 展示结果：aggregation 模式 ──
+    elif st.session_state.phase in ("sources_ready", "gen_report", "report_ready", "scrape_digest") \
+            and st.session_state.get("task_mode") == "aggregation":
+        import pandas as pd
+        question  = st.session_state.question
+        agg_items = st.session_state.get("agg_items", [])
+        digest    = st.session_state.digest
+
+        st.markdown(f"""
+<div style="margin-bottom:8px">
+  <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;letter-spacing:-0.01em">🔍 数据汇总：{question}</div>
+</div>
+""", unsafe_allow_html=True)
+
+        st.markdown(f"""
+<div class="stat-bar">
+  <div class="stat-chip">📦 条目总数 <span class="val">{len(agg_items)}</span></div>
+  <div class="stat-chip">🌐 来源平台 <span class="val">{len(set(i.get('_source_domain','') for i in agg_items))}</span></div>
+</div>
+""", unsafe_allow_html=True)
+
+        with st.expander("🧠 AI 意图分析", expanded=False):
+            for line in st.session_state.reasoning_log:
+                st.markdown(f"<p style='color:#64748b;font-size:0.86rem;padding:3px 0'>{line}</p>", unsafe_allow_html=True)
+
+        # AI 数据分析报告
+        if digest:
+            st.markdown('<div class="section-title">📊 AI 数据分析报告</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="digest-card"><div class="digest-body">{digest.replace(chr(10),"<br>")}</div></div>', unsafe_allow_html=True)
+
+        # 结构化数据表格
+        if agg_items:
+            st.markdown('<div class="section-title">📋 结构化数据明细</div>', unsafe_allow_html=True)
+            # 过滤掉内部字段，建 DataFrame
+            display_keys = [k for k in agg_items[0].keys() if not k.startswith("_")]
+            df = pd.DataFrame([{k: (item.get(k) or "") for k in display_keys} for item in agg_items])
+            st.dataframe(df, use_container_width=True, height=450)
+
+            # 下载按钮
+            csv = df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("⬇️ 下载 CSV", data=csv,
+                               file_name=f"data_{question[:20]}.csv",
+                               mime="text/csv")
+        else:
+            st.warning("未能提取到结构化数据，请尝试更具体的描述。")
+
+        st.markdown("---")
+        ac1, ac2 = st.columns([2, 1])
+        with ac1:
+            if st.button("💾 保存报告", type="primary", use_container_width=True):
+                fp = save_report(question, digest)
+                st.success(f"✅ 已保存：{fp}")
+        with ac2:
+            if st.button("🏠 首页", use_container_width=True, key="home_agg"):
+                go_home(); st.rerun()
+
+    # ── 展示结果：research 模式 ──
     elif st.session_state.phase in ("sources_ready", "gen_report", "report_ready", "scrape_digest"):
         question = st.session_state.question
         sources  = st.session_state.sources

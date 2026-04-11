@@ -127,20 +127,36 @@ TEMPLATES: dict[str, dict] = {
 # ══════════════════════════════════════════════
 
 def prompt_reason(question: str) -> str:
-    return f"""你是一个严谨的研究助手。请先分析以下问题，制定最佳处理策略。
+    return f"""你是一个高级搜索规划师。分析用户的需求，判断任务模式并制定最佳搜索策略。
 
-问题：{question}
+用户问题：{question}
 
-请以 JSON 格式返回你的分析，包含以下字段：
+任务模式判断规则：
+- **research（深度研究）**：用户想理解某话题、获取知识、写分析报告。如：AI趋势、技术原理、行业分析、某事件背景。
+- **aggregation（数据汇总）**：用户想收集一批资源或列表数据。如：找工作、找房子、商品比价、企业名录、开源项目列表、竞品收集。
+
+aggregation 模式下搜索词规则：
+- 必须使用 site: 语法定向到专业平台
+- 找工作 → site:liepin.com / site:zhaopin.com / site:lagou.com / site:boss.zhipin.com
+- 找房子 → site:lianjia.com / site:anjuke.com / site:ke.com
+- 找公司 → site:tianyancha.com / site:qichacha.com
+- 开源项目 → site:github.com
+- 商品比价 → site:jd.com / site:taobao.com
+- 没有明显平台时，生成 3-5 个覆盖不同平台的搜索词
+
+请以 JSON 格式返回：
 {{
-  "question_type": "问题类型，从以下选一个：实时信息/深度研究/简单事实/闲聊对话",
+  "task_mode": "research 或 aggregation",
+  "question_type": "实时信息/深度研究/简单事实/闲聊对话/数据汇总",
   "need_search": true 或 false,
   "reasoning": "你的分析思路（2-4句话）",
-  "search_queries": ["搜索词1", "搜索词2", "搜索词3", "搜索词4"],
-  "answer_direct": "如果 need_search 为 false，在这里直接给出完整回答；否则留空字符串"
+  "search_queries": ["搜索词1", "搜索词2", "搜索词3"],
+  "target_item": "aggregation 时填要收集的对象，如'招聘岗位'、'二手房源'、'开源项目'；research 时留空",
+  "max_pages": 5,
+  "answer_direct": "如果 need_search 为 false，这里给出完整回答；否则留空"
 }}
 
-只返回 JSON，不要返回任何其他内容。"""
+只返回 JSON，不要其他内容。"""
 
 
 def prompt_summarize_source(content: str, question: str, title: str) -> str:
@@ -253,3 +269,34 @@ def prompt_chat_with_report(question: str, report: str, history: str, user_msg: 
 {'对话历史：\n' + history if history else ''}
 
 用户追问：{user_msg}"""
+
+
+def prompt_extract_list(page_content: str, target_item: str) -> str:
+    return f"""以下是一个网页的正文内容，用户想收集【{target_item}】的列表信息。
+
+请找出网页中所有相关条目，以严格的 JSON 数组格式返回。
+每个对象尽量包含以下字段（没有的字段填 null）：
+title（名称/职位/标题）、company（公司/发布者）、price（价格/薪资）、location（地点）、tags（标签列表）、url（链接）、desc（简短描述）
+
+要求：
+- 只返回 JSON 数组，不要任何其他内容
+- 找不到任何条目时返回 []
+- 每个对象字段保持一致
+
+网页内容：
+{page_content[:15000]}"""
+
+
+def prompt_aggregation_report(items_md: str, question: str, total: int) -> str:
+    return f"""用户问题：{question}
+
+以下是从多个网站汇总的 {total} 条数据：
+
+{items_md[:12000]}
+
+请生成一份简洁的数据分析报告，包含：
+1. 数据概况（共几条，来自哪些平台，整体特征）
+2. 关键发现（2-4条最值得关注的规律、趋势或洞察）
+3. 给用户的具体建议（可操作的 2-3 条建议）
+
+用中文，简洁专业，重点突出数据规律。"""

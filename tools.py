@@ -118,6 +118,28 @@ def deep_scrape(start_url: str, max_pages: int = 5) -> str:
 # 搜索
 # ══════════════════════════════════════════════
 
+def fetch_via_jina(url: str, max_chars: int = 15000) -> str:
+    """
+    使用 Jina Reader API 抓取网页正文（自动解析、反反爬）。
+    失败时降级到 fetch_page_content。
+    """
+    jina_url = f"https://r.jina.ai/{url}"
+    try:
+        resp = httpx.get(
+            jina_url, timeout=25, follow_redirects=True,
+            headers={
+                "Accept": "text/plain",
+                "User-Agent": USER_AGENTS[0],
+                "X-Return-Format": "markdown",
+            },
+        )
+        if resp.status_code == 200 and len(resp.text) > 100:
+            return resp.text[:max_chars]
+    except Exception:
+        pass
+    return fetch_page_content(url, max_chars)
+
+
 def web_search(query: str, max_results: int = 5) -> list[dict]:
     """使用 DuckDuckGo 搜索，返回结果列表。"""
     results = []
