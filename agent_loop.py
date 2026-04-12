@@ -18,7 +18,7 @@ from typing import Callable
 
 from pydantic import BaseModel, field_validator, ValidationError
 
-from agent import ai_generate_role, extract_json
+from agent import ai_generate_role, ai_tool_call, extract_json
 from tools import web_search, fetch_via_jina
 from prompts import prompt_react_system
 
@@ -363,27 +363,42 @@ def run_agent(
 
             prompt = _build_prompt(question, history)
 
-            # 调用 LLM
-            raw = ai_generate_role(
-                prompt,
-                system=system,
-                role="orchestrator",
-                engine=engine,
-                structured=True,
-            )
-
-            # #1 Pydantic 校验 + 自动重试
+            # ── #2 优先尝试原生 Function Calling，失败降级 JSON 模式 ──
+            action: ReActAction | None = None
             try:
-                action = _parse_action(raw, engine, prompt, system)
-            except LLMSchemaError as e:
-                history.append({
-                    "thought": "(格式错误)",
-                    "tool": "none",
-                    "args": {},
-                    "observation": str(e),
-                    "error_type": "LLMSchemaError",
-                })
-                continue
+                tool_name, tool_args, thought = ai_tool_call(
+                    prompt, system=system, tools=TOOLS,
+                    role="orchestrator", engine=engine,
+                )
+                action = ReActAction(
+                    thought=thought or f"(原生调用 {tool_name})",
+                    tool=tool_name,
+                    args=tool_args,
+                )
+                print(f"[Agent] 步骤 {step_num + 1} 使用原生调用 → {tool_name}")
+            except Exception as native_err:
+                print(f"[Agent] 原生调用失败，降级 JSON 模式: {native_err}")
+
+            if action is None:
+                # 降级：JSON 模式
+                raw = ai_generate_role(
+                    prompt,
+                    system=system,
+                    role="orchestrator",
+                    engine=engine,
+                    structured=True,
+                )
+                try:
+                    action = _parse_action(raw, engine, prompt, system)
+                except LLMSchemaError as e:
+                    history.append({
+                        "thought": "(格式错误)",
+                        "tool": "none",
+                        "args": {},
+                        "observation": str(e),
+                        "error_type": "LLMSchemaError",
+                    })
+                    continue
 
             # 执行工具
             try:

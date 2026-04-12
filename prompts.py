@@ -459,3 +459,55 @@ def prompt_react_system(tools: dict | None = None) -> str:
 - 优先搜索再爬取，不要重复搜索相同关键词
 - 如果用户上传了文档，优先使用 rag_retrieve 检索本地内容
 - 最终答案（answer）要完整、结构清晰，使用 Markdown 格式"""
+
+
+# ══════════════════════════════════════════════
+# Planner Agent — 规划器 & 报告器 Prompt
+# ══════════════════════════════════════════════
+
+def prompt_plan_research(question: str) -> str:
+    """
+    规划器 Prompt：让 orchestrator LLM 把大问题拆解为 3-5 个可独立调研的子问题。
+    返回 JSON：{reasoning, sub_questions: [...]}
+    """
+    return f"""你是一位资深研究规划师。用户提出了一个需要深度调研的复杂问题，你的任务是把它拆解成 3-5 个**独立、具体、可直接搜索**的子问题。
+
+## 用户问题
+{question}
+
+## 输出格式（只输出一个 JSON，不要有任何其他内容）
+{{"reasoning": "为什么这样拆解（1-2 句话，说明拆解逻辑）", "sub_questions": ["子问题 1（具体可搜索的）", "子问题 2", "子问题 3"]}}
+
+## 拆解原则
+- 每个子问题覆盖原问题的不同维度，互不重叠
+- 子问题必须足够具体，一句话就能在搜索引擎搜出有价值的结果
+- 3-5 个即可，宁少勿滥
+- 语言与用户问题一致（中文问题输出中文子问题）"""
+
+
+def prompt_synthesize_report(question: str, sub_results: list[dict]) -> str:
+    """
+    报告器 Prompt：综合所有子问题的研究结果，生成结构清晰的最终报告。
+    sub_results: list of {sub_q, answer}
+    """
+    findings_parts = []
+    for i, r in enumerate(sub_results, 1):
+        findings_parts.append(
+            f"### 子问题 {i}：{r['sub_q']}\n{r['answer']}"
+        )
+    findings_text = "\n\n".join(findings_parts)
+
+    return f"""你是一位专业的研究报告撰写专家。请根据以下各子问题的详细研究结果，为用户撰写一份完整、结构清晰的综合研究报告。
+
+## 用户的核心问题
+{question}
+
+## 各子问题研究结果
+{findings_text}
+
+## 撰写要求
+- 格式：Markdown，有清晰的章节结构（使用 ## 和 ### 标题）
+- 综合各子问题的发现，深度融合，不要简单堆砌
+- 提炼 2-3 条跨维度的关键洞察
+- 结尾设「总结与建议」章节
+- 语言：中文，专业但易读，避免废话"""

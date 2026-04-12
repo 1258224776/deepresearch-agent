@@ -236,6 +236,201 @@ def ai_generate_role(prompt: str, system: str = "",
 
 
 # ══════════════════════════════════════════════
+# #2 原生 Function Calling 支持
+#
+# 对 Google / Anthropic / OpenAI-compat 三类提供商，
+# 分别生成各自的工具声明格式，并发起原生工具调用。
+# agent_loop.py 优先使用此接口；失败则降级到 JSON 解析模式。
+# ══════════════════════════════════════════════
+
+def _schema_for_tools(tools: dict, fmt: str) -> list:
+    """
+    把 TOOLS 注册表转换为各厂商原生工具声明格式。
+    fmt: "google" | "anthropic" | "openai"
+    """
+    if fmt == "google":
+        declarations = []
+        for name, info in tools.items():
+            props = {}
+            for arg in info["args"]:
+                desc = info.get("args_desc", {}).get(arg, arg)
+                props[arg] = {"type": "string", "description": desc}
+            declarations.append({
+                "name": name,
+                "description": info["desc"],
+                "parameters": {
+                    "type": "object",
+                    "properties": props,
+                    "required": info["args"],
+                },
+            })
+        return [{"function_declarations": declarations}]
+
+    if fmt == "anthropic":
+        result = []
+        for name, info in tools.items():
+            props = {}
+            for arg in info["args"]:
+                desc = info.get("args_desc", {}).get(arg, arg)
+                props[arg] = {"type": "string", "description": desc}
+            result.append({
+                "name": name,
+                "description": info["desc"],
+                "input_schema": {
+                    "type": "object",
+                    "properties": props,
+                    "required": info["args"],
+                },
+            })
+        return result
+
+    # openai / openai_compat
+    result = []
+    for name, info in tools.items():
+        props = {}
+        for arg in info["args"]:
+            desc = info.get("args_desc", {}).get(arg, arg)
+            props[arg] = {"type": "string", "description": desc}
+        result.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": info["desc"],
+                "parameters": {
+                    "type": "object",
+                    "properties": props,
+                    "required": info["args"],
+                },
+            },
+        })
+    return result
+
+
+def _call_provider_tool(
+    name: str, cfg: dict, prompt: str, system: str, tools: dict
+) -> tuple[str, dict, str]:
+    """
+    用单个提供商的原生 Function Calling 接口调用工具。
+    返回 (tool_name, args_dict, thought_text)。
+    thought_text 为模型在调用工具前输出的推理文字（可能为空字符串）。
+    失败时抛出异常。
+    """
+    api_key = load_secret(cfg["env"])
+    if not api_key:
+        raise ValueError(f"API Key 未配置：{cfg['env']}")
+    model = cfg.get("model", "")
+    ptype = cfg.get("type", "openai_compat")
+
+    # ── Google ──────────────────────────────────
+    if ptype == "google":
+        client = genai.Client(api_key=api_key)
+        google_tools = _schema_for_tools(tools, "google")
+        cfg_kw: dict = {"tools": google_tools}
+        # mode=ANY 强制模型调用某个工具
+        cfg_kw["tool_config"] = {
+            "function_calling_config": {"mode": "ANY"}
+        }
+        if system:
+            cfg_kw["system_instruction"] = system
+        gen_cfg = _genai_types.GenerateContentConfig(**cfg_kw)
+        response = client.models.generate_content(
+            model=model, contents=prompt, config=gen_cfg
+        )
+        thought = ""
+        for part in response.candidates[0].content.parts:
+            fc = getattr(part, "function_call", None)
+            if fc and getattr(fc, "name", None):
+                return fc.name, dict(fc.args or {}), thought
+            if getattr(part, "text", None):
+                thought += part.text
+        raise RuntimeError("Google 未返回 function_call（意外的纯文本响应）")
+
+    # ── Anthropic ────────────────────────────────
+    if ptype == "anthropic":
+        if _ANT is None:
+            raise ImportError("anthropic 包未安装，请 pip install anthropic")
+        client = _ANT.Anthropic(api_key=api_key)
+        ant_tools = _schema_for_tools(tools, "anthropic")
+        kwargs: dict = {
+            "model":       model,
+            "max_tokens":  8192,
+            "messages":    [{"role": "user", "content": prompt}],
+            "tools":       ant_tools,
+            "tool_choice": {"type": "any"},   # 强制调用工具
+        }
+        if system:
+            kwargs["system"] = system
+        resp = client.messages.create(**kwargs)
+        thought = ""
+        for block in resp.content:
+            if block.type == "text":
+                thought += block.text
+            elif block.type == "tool_use":
+                return block.name, block.input, thought
+        raise RuntimeError(
+            f"Anthropic 未返回 tool_use（stop_reason={resp.stop_reason}）"
+        )
+
+    # ── OpenAI 兼容 ──────────────────────────────
+    if _OAI is None:
+        raise ImportError("openai 包未安装")
+    oai_tools = _schema_for_tools(tools, "openai")
+    client = _OAI(api_key=api_key, base_url=cfg.get("base_url"))
+    messages_oai = []
+    if system:
+        messages_oai.append({"role": "system", "content": system})
+    messages_oai.append({"role": "user", "content": prompt})
+    resp = client.chat.completions.create(
+        model=model,
+        messages=messages_oai,
+        tools=oai_tools,
+        tool_choice="required",
+    )
+    msg = resp.choices[0].message
+    thought = msg.content or ""
+    if msg.tool_calls:
+        tc = msg.tool_calls[0]
+        import json as _json_mod
+        return tc.function.name, _json_mod.loads(tc.function.arguments), thought
+    raise RuntimeError("OpenAI 兼容接口未返回 tool_calls")
+
+
+def ai_tool_call(
+    prompt: str,
+    system: str,
+    tools: dict,
+    role: str = "orchestrator",
+    engine: str = "",
+) -> tuple[str, dict, str]:
+    """
+    原生 Function Calling 公开接口。
+    按 engine/role 路由提供商列表，依次尝试，返回 (tool_name, args, thought)。
+    全部失败时抛出 RuntimeError（调用方降级到 JSON 解析模式）。
+    """
+    preset = ENGINE_PRESETS.get(engine, {})
+    order_str = preset.get(role, "") or ROLE_ORDER.get(role, "")
+    if not order_str:
+        order_str = "google_pro,claude_opus,glm_pro,minimax,siliconflow_pro"
+    order = [p.strip() for p in order_str.split(",")]
+
+    last_err: Exception | None = None
+    for pname in order:
+        cfg = PROVIDERS.get(pname)
+        if not cfg:
+            continue
+        try:
+            result = _call_provider_tool(pname, cfg, prompt, system, tools)
+            print(f"[NativeCall] {pname} → {result[0]}")
+            return result
+        except Exception as e:
+            print(f"[NativeCall] {pname} 失败: {str(e)[:120]}")
+            last_err = e
+            continue   # 任何错误都尝试下一个提供商
+
+    raise RuntimeError(f"原生 Function Calling 全部失败。最后错误：{last_err}")
+
+
+# ══════════════════════════════════════════════
 # 推理规划层
 # ══════════════════════════════════════════════
 

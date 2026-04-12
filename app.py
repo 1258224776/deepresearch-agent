@@ -2223,90 +2223,177 @@ elif st.session_state.mode == "agent":
     # ── 输入阶段 ──
     if st.session_state.phase == "input":
         st.markdown("### 🤖 Agent 自主模式")
-        st.caption("输入你的问题，Agent 会自主规划：搜索、爬取网页、检索本地文档……逐步推理，直到给出完整答案。")
+
+        # ── sub-mode 选择 ──
+        agent_sub = st.radio(
+            "运行模式",
+            ["⚡ ReAct 自主", "🗺️ 深度规划"],
+            horizontal=True,
+            key="agent_sub_mode",
+            help=(
+                "⚡ ReAct 自主：单一 ReAct 循环，适合明确的单一问题。\n"
+                "🗺️ 深度规划：先拆解为 3-5 个子问题，分别调研后综合成报告，适合复杂多维问题。"
+            ),
+        )
+        is_planner = agent_sub.startswith("🗺️")
+
+        if is_planner:
+            st.caption("输入复杂问题，Agent 先自动拆解为多个子问题，逐一深度调研，最后综合出结构化报告。")
+        else:
+            st.caption("输入你的问题，Agent 会自主规划：搜索、爬取网页、检索本地文档……逐步推理，直到给出完整答案。")
 
         question = st.text_area(
             "你的问题",
-            placeholder="例如：特斯拉 2024 年的核心财务指标和市场表现如何？",
+            placeholder=(
+                "例如：比较特斯拉和比亚迪 2024 年的市场策略和财务表现"
+                if is_planner else
+                "例如：特斯拉 2024 年的核心财务指标和市场表现如何？"
+            ),
             height=100,
             key="agent_question_input",
         )
 
-        c_run, c_adv = st.columns([3, 1])
-        with c_adv:
-            max_steps = st.number_input("最大步数", min_value=3, max_value=15, value=8, step=1)
-        with c_run:
-            run_btn = st.button("🚀 启动 Agent", use_container_width=True, type="primary",
-                                disabled=not question.strip())
+        if is_planner:
+            run_btn = st.button("🗺️ 启动深度规划", use_container_width=True,
+                                type="primary", disabled=not question.strip())
+            max_steps = SUB_MAX_STEPS_DEFAULT = 4   # 固定子步数，不暴露给用户
+        else:
+            c_run, c_adv = st.columns([3, 1])
+            with c_adv:
+                max_steps = st.number_input("最大步数", min_value=3, max_value=15,
+                                            value=8, step=1)
+            with c_run:
+                run_btn = st.button("🚀 启动 Agent", use_container_width=True,
+                                    type="primary", disabled=not question.strip())
 
         if run_btn and question.strip():
             st.session_state.agent_question_submitted = question.strip()
             st.session_state.agent_max_steps          = int(max_steps)
+            st.session_state.agent_is_planner         = is_planner
             st.session_state.phase                    = "running"
             st.rerun()
 
     # ── 运行阶段 ──
     elif st.session_state.phase == "running":
-        question  = st.session_state.get("agent_question_submitted", "")
-        max_steps = st.session_state.get("agent_max_steps", 8)
-        engine    = st.session_state.get("ue_engine", "")
+        question   = st.session_state.get("agent_question_submitted", "")
+        max_steps  = st.session_state.get("agent_max_steps", 8)
+        engine     = st.session_state.get("ue_engine", "")
+        is_planner = st.session_state.get("agent_is_planner", False)
 
-        st.markdown(f"### 🤖 Agent 正在处理：{question}")
+        mode_label = "🗺️ 深度规划" if is_planner else "🤖 ReAct 自主"
+        st.markdown(f"### {mode_label} 正在处理：{question}")
 
-        status_box  = st.empty()
-        steps_area  = st.container()
-        step_widgets: list = []
+        status_box = st.empty()
 
         def _progress(msg: str):
             status_box.info(f"⏳ {msg}")
 
-        with st.spinner("Agent 推理中，请稍候…"):
-            result = run_agent(
-                question=question,
-                engine=engine,
-                max_steps=max_steps,
-                progress_callback=_progress,
-            )
+        # ══ 分支：深度规划模式 ══
+        if is_planner:
+            from agent_planner import run_planner_agent
 
-        status_box.empty()
+            with st.spinner("规划 Agent 运行中，请稍候…"):
+                result = run_planner_agent(
+                    question=question,
+                    engine=engine,
+                    progress_callback=_progress,
+                )
+            status_box.empty()
 
-        # ── 展示每步过程 ──
-        steps = result.get("steps", [])
-        if steps:
-            st.markdown("#### 推理步骤")
-            for i, step in enumerate(steps, 1):
-                tool_icon = {
-                    "search":       "🔍",
-                    "scrape":       "🌐",
-                    "rag_retrieve": "📂",
-                    "finish":       "🏁",
-                }.get(step.get("tool", ""), "🔧")
-                label = f"{tool_icon} 步骤 {i}：{step.get('tool', '')}({step.get('args', {})})"
-                with st.expander(label, expanded=False):
-                    st.markdown(f"**💭 思考**\n\n{step.get('thought', '')}")
-                    obs = step.get("observation", "")
-                    if obs and obs != "(任务完成)":
-                        st.markdown("**👁️ 观察结果**")
-                        st.text(obs[:1500] + ("…" if len(obs) > 1500 else ""))
+            # 展示规划方案
+            plan = result.get("plan", {})
+            if plan:
+                with st.expander("📋 研究规划", expanded=True):
+                    st.caption(plan.get("reasoning", ""))
+                    for idx, sq in enumerate(plan.get("sub_questions", []), 1):
+                        st.markdown(f"**{idx}.** {sq}")
 
-        # ── 最终答案 ──
-        st.divider()
-        st.markdown("#### 📋 最终答案")
-        answer = result.get("answer", "")
-        st.markdown(answer)
+            # 展示每个子问题结果
+            sub_results = result.get("sub_results", [])
+            if sub_results:
+                st.markdown("#### 子问题调研结果")
+                for i, sr in enumerate(sub_results, 1):
+                    label = f"🔬 子问题 {i}：{sr['sub_q']}"
+                    with st.expander(label, expanded=False):
+                        st.markdown(sr.get("answer", "（无结果）"))
+                        if sr.get("error"):
+                            st.warning(f"执行出错：{sr['error'][:200]}")
 
-        # ── 操作按钮 ──
-        st.divider()
-        cb1, cb2, cb3 = st.columns(3)
-        with cb1:
-            if st.button("💾 保存报告", use_container_width=True, type="primary"):
-                from tools import save_report
-                fp = save_report(question, answer)
-                st.success(f"✅ 已保存：{fp}")
-        with cb2:
-            if st.button("🔄 重新提问", use_container_width=True):
-                st.session_state.phase = "input"
-                st.rerun()
-        with cb3:
-            if st.button("🏠 返回首页", use_container_width=True):
-                go_home(); st.rerun()
+            # 最终综合报告
+            st.divider()
+            st.markdown("#### 📋 最终综合报告")
+            answer = result.get("answer", "")
+            st.markdown(answer)
+
+            # 操作按钮
+            st.divider()
+            cb1, cb2, cb3 = st.columns(3)
+            with cb1:
+                if st.button("💾 保存报告", use_container_width=True, type="primary",
+                             key="planner_save"):
+                    from tools import save_report
+                    fp = save_report(question, answer)
+                    st.success(f"✅ 已保存：{fp}")
+            with cb2:
+                if st.button("🔄 重新提问", use_container_width=True, key="planner_retry"):
+                    st.session_state.phase = "input"
+                    st.rerun()
+            with cb3:
+                if st.button("🏠 返回首页", use_container_width=True, key="planner_home"):
+                    go_home(); st.rerun()
+
+        # ══ 分支：ReAct 自主模式 ══
+        else:
+            with st.spinner("Agent 推理中，请稍候…"):
+                result = run_agent(
+                    question=question,
+                    engine=engine,
+                    max_steps=max_steps,
+                    progress_callback=_progress,
+                )
+            status_box.empty()
+
+            # 展示每步过程
+            steps = result.get("steps", [])
+            if steps:
+                st.markdown("#### 推理步骤")
+                for i, step in enumerate(steps, 1):
+                    tool_icon = {
+                        "search":       "🔍",
+                        "search_site":  "🔍",
+                        "scrape":       "🌐",
+                        "extract":      "🔎",
+                        "summarize":    "📝",
+                        "rag_retrieve": "📂",
+                        "finish":       "🏁",
+                    }.get(step.get("tool", ""), "🔧")
+                    label = f"{tool_icon} 步骤 {i}：{step.get('tool', '')}({step.get('args', {})})"
+                    with st.expander(label, expanded=False):
+                        st.markdown(f"**💭 思考**\n\n{step.get('thought', '')}")
+                        obs = step.get("observation", "")
+                        if obs and obs != "(任务完成)":
+                            st.markdown("**👁️ 观察结果**")
+                            st.text(obs[:1500] + ("…" if len(obs) > 1500 else ""))
+
+            # 最终答案
+            st.divider()
+            st.markdown("#### 📋 最终答案")
+            answer = result.get("answer", "")
+            st.markdown(answer)
+
+            # 操作按钮
+            st.divider()
+            cb1, cb2, cb3 = st.columns(3)
+            with cb1:
+                if st.button("💾 保存报告", use_container_width=True, type="primary",
+                             key="react_save"):
+                    from tools import save_report
+                    fp = save_report(question, answer)
+                    st.success(f"✅ 已保存：{fp}")
+            with cb2:
+                if st.button("🔄 重新提问", use_container_width=True, key="react_retry"):
+                    st.session_state.phase = "input"
+                    st.rerun()
+            with cb3:
+                if st.button("🏠 返回首页", use_container_width=True, key="react_home"):
+                    go_home(); st.rerun()
