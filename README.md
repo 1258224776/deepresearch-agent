@@ -2,20 +2,29 @@
 
 > AI 驱动的深度研究与数据提取工具，支持多家大模型并发协作，一键生成可视化数据看板。
 
-**在线体验：** [deepresearch-agent-3zq2q8sgtcqocvicjyk8m6.streamlit.app](https://deepresearch-agent-3zq2q8sgtcqocvicjyk8m6.streamlit.app/)
-
 ---
 
 ## ✨ 核心功能
 
-### 🤖 Agent 自主模式（新功能）
-输入任意问题，AI 自主决策每一步行动：
-1. **思考**：分析当前信息缺口，决定下一步
-2. **调用工具**：搜索网络 / 爬取网页 / 检索本地文档
-3. **观察结果**：消化工具返回的内容，继续推理
-4. **循环直到完成**：自主判断何时信息充足，输出完整报告
+### 🤖 Agent 自主模式
 
-全程可见每步的**思考过程 + 工具调用 + 观察结果**，真正的 ReAct Agent 架构。
+提供两种子模式，适配不同复杂度的问题：
+
+#### ⚡ ReAct 自主
+输入明确的单一问题，AI 自主循环推理：
+1. **思考**：分析当前信息缺口，决定下一步行动
+2. **调用工具**：搜索网络 / 爬取网页 / 检索本地文档 / 定向提取 / AI 摘要
+3. **观察结果**：消化工具返回，继续推理
+4. **循环直到完成**：自主判断信息充足时输出完整报告
+
+工具自动使用各大模型的**原生 Function Calling API**，调用可靠性大幅提升，并在不支持时自动降级。
+
+#### 🗺️ 深度规划
+适合多维度复杂问题（如「比较 A 和 B」「分析某行业格局」）：
+1. **Planner**：主脑 LLM 把大问题拆解为 3-5 个独立子问题
+2. **Executor**：对每个子问题独立运行精简 ReAct 循环
+3. **Memory**：前序发现自动注入后续子任务，避免重复研究
+4. **Reporter**：汇总所有调研结果，生成结构化综合报告
 
 ### ⚡ URL 智能提取（核心亮点）
 粘贴任意网址 + 描述你想要什么，系统自动完成：
@@ -52,16 +61,11 @@
 
 系统会自动探测网络环境并推荐合适的引擎，也支持一键手动切换。
 
+**切换模型：** 直接编辑 `providers.yaml`，无需改动任何 Python 代码。
+
 ---
 
 ## 🚀 快速开始
-
-### 在线使用
-直接访问：[在线体验地址](https://deepresearch-agent-3zq2q8sgtcqocvicjyk8m6.streamlit.app/)
-
-在左侧侧边栏的 **🔑 API Key 配置** 中填入自己的 Key 即可使用，无需部署。
-
-### 本地部署
 
 **1. 克隆项目**
 ```bash
@@ -105,14 +109,17 @@ streamlit run app.py
 
 ```
 deepresearch-agent/
-├── app.py           # Streamlit 前端主程序（4 种模式）
-├── agent.py         # AI 调用核心：多提供商路由、流水线逻辑
-├── agent_loop.py    # ReAct Agent 核心：工具注册 + 推理循环
-├── prompts.py       # 所有 Prompt 模板集中管理
-├── config.py        # 提供商配置、引擎预设、全局常量
-├── tools.py         # 爬虫工具：搜索、抓取、文件处理
-├── rag.py           # 本地向量检索（Faiss + Sentence-Transformers）
-└── .env             # API Key 配置（不提交 Git）
+├── app.py              # Streamlit 前端主程序（4 种模式）
+├── agent.py            # AI 调用核心：多提供商路由、原生 Function Calling
+├── agent_loop.py       # ReAct Agent：工具注册 + 推理循环（7 种工具）
+├── agent_planner.py    # 深度规划 Agent：Planner/Executor/Memory/Reporter
+├── prompts.py          # 所有 Prompt 模板集中管理
+├── config.py           # 引擎预设、全局常量（从 providers.yaml 加载）
+├── providers.yaml      # AI 提供商配置（模型切换改这里，不动代码）
+├── tools.py            # 爬虫工具：搜索、抓取、文件处理
+├── rag.py              # 本地向量检索（Faiss + Sentence-Transformers）
+├── api.py              # FastAPI 封装（供 Dify 等平台导入）
+└── .env                # API Key 配置（不提交 Git）
 ```
 
 ---
