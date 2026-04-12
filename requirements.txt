@@ -12,3 +12,4 @@ pandas
 faiss-cpu
 sentence-transformers
 anthropic
+pyyaml

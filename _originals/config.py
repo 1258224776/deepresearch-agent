@@ -1,29 +1,11 @@
 """
 config.py — 环境变量、API Key、全局常量
-
-提供商配置优先从同目录的 providers.yaml 加载（#7 配置外置）。
-找不到 yaml 或解析失败时，自动回退到下方的内置默认值，不影响运行。
-修改模型只需编辑 providers.yaml，无需动此文件。
 """
 import os
 from dotenv import load_dotenv
 
 # 始终加载 config.py 同目录下的 .env，不依赖运行时 cwd
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
-
-
-def _load_providers_yaml() -> dict | None:
-    """尝试从 providers.yaml 加载提供商配置，失败返回 None。"""
-    yaml_path = os.path.join(os.path.dirname(__file__), "providers.yaml")
-    if not os.path.exists(yaml_path):
-        return None
-    try:
-        import yaml  # PyYAML，requirements.txt 里已有
-        with open(yaml_path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return data.get("providers") or None
-    except Exception:
-        return None
 
 # ── User-Agent 轮换池 ──
 USER_AGENTS = [
@@ -49,7 +31,7 @@ USER_AGENTS = [
 #   True  → 调用时启用原生 JSON 模式，返回 100% 合法 JSON
 #   False → 依赖 Prompt 约束 + 正则清洗
 # ══════════════════════════════════════════════
-_PROVIDERS_DEFAULT: dict[str, dict] = {
+PROVIDERS: dict[str, dict] = {
 
     # ━━━ 海外阵营（需 VPN）━━━━━━━━━━━━━━━━━━━━━
 
@@ -144,9 +126,6 @@ _PROVIDERS_DEFAULT: dict[str, dict] = {
         "structured_output": False,
     },
 }
-
-# 优先使用 providers.yaml，找不到则用内置默认值
-PROVIDERS: dict[str, dict] = _load_providers_yaml() or _PROVIDERS_DEFAULT
 
 # ══════════════════════════════════════════════
 # 引擎预设

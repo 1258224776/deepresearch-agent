@@ -1,0 +1,90 @@
+# providers.yaml — AI 提供商配置
+#
+# 修改此文件即可切换模型，无需动 Python 代码。
+# config.py 启动时优先加载此文件，找不到时回退到内置默认值。
+#
+# 字段说明：
+#   env:               对应的环境变量名（API Key）
+#   model:             模型 ID
+#   type:              google | anthropic | openai_compat
+#   base_url:          openai_compat 类型必填
+#   structured_output: true = 启用原生 JSON 模式；false = 依赖 prompt 约束
+
+providers:
+
+  # ── 海外阵营（需 VPN） ──────────────────────────
+
+  google_pro:
+    env: GOOGLE_API_KEY
+    model: gemini-3.0-pro-preview
+    type: google
+    structured_output: true
+
+  claude_opus:
+    env: ANTHROPIC_API_KEY
+    model: claude-opus-4-6
+    type: anthropic
+    structured_output: false
+
+  google:
+    env: GOOGLE_API_KEY
+    model: gemini-2.5-flash
+    type: google
+    structured_output: true
+
+  claude_haiku:
+    env: ANTHROPIC_API_KEY
+    model: claude-haiku-4-5-20251001
+    type: anthropic
+    structured_output: false
+
+  # ── 国内直连阵营 ────────────────────────────────
+
+  glm_pro:
+    env: GLM_API_KEY
+    model: glm-5
+    base_url: https://open.bigmodel.cn/api/paas/v4/
+    type: openai_compat
+    structured_output: false
+
+  glm:
+    env: GLM_API_KEY
+    model: glm-4-flash
+    base_url: https://open.bigmodel.cn/api/paas/v4/
+    type: openai_compat
+    structured_output: false
+
+  minimax:
+    env: MINIMAX_API_KEY
+    model: MiniMax-M2.7
+    base_url: https://api.minimax.chat/v1/
+    type: openai_compat
+    structured_output: false
+
+  minimax_worker:
+    env: MINIMAX_API_KEY
+    model: abab6.5g
+    base_url: https://api.minimax.chat/v1/
+    type: openai_compat
+    structured_output: false
+
+  siliconflow_pro:
+    env: SILICONFLOW_API_KEY
+    model: deepseek-ai/DeepSeek-V3
+    base_url: https://api.siliconflow.cn/v1/
+    type: openai_compat
+    structured_output: false
+
+  siliconflow:
+    env: SILICONFLOW_API_KEY
+    model: Qwen/Qwen2.5-7B-Instruct
+    base_url: https://api.siliconflow.cn/v1/
+    type: openai_compat
+    structured_output: false
+
+  openai:
+    env: OPENAI_API_KEY
+    model: gpt-4o-mini
+    base_url: https://api.openai.com/v1/
+    type: openai_compat
+    structured_output: false
