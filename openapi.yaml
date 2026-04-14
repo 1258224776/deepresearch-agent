@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: DeepResearch Agent API
-  version: 1.2.0
+  version: 1.5.0
   description: >
     HTTP wrapper for the DeepResearch ReAct workflow. Returns the final report,
     step trace, structured observations, deduplicated references, and built-in
@@ -31,7 +31,8 @@ paths:
       summary: List available built-in skills
       description: >
         Return the built-in skill catalog used by the ReAct agent, including
-        category, required arguments, optional arguments, and descriptions.
+        category, required arguments, optional arguments, descriptions,
+        current enabled state, and available skill profiles.
       responses:
         "200":
           description: Skill catalog
@@ -43,11 +44,30 @@ paths:
                   total_skills:
                     type: integer
                     description: Number of registered built-in skills
+                  enabled_skills:
+                    type: integer
+                    description: Number of enabled built-in skills
                   categories:
                     type: array
                     description: Skill categories
                     items:
                       type: string
+                  profiles:
+                    type: array
+                    description: Available skill profiles
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        allowed_skills:
+                          type: array
+                          items:
+                            type: string
+                        allowed_count:
+                          type: integer
                   skills:
                     type: array
                     description: Available built-in skills
@@ -74,6 +94,74 @@ paths:
                             type: string
                         returns_sources:
                           type: boolean
+                        enabled:
+                          type: boolean
+  /skills/route-preview:
+    post:
+      operationId: previewSkillRoute
+      summary: Preview skill routing for a question
+      description: >
+        Preview the current RouteDecision for a question after applying enabled
+        skills, the selected profile allowlist, and question routing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - question
+              properties:
+                question:
+                  type: string
+                  description: Question to preview routing for
+                engine:
+                  type: string
+                  description: Engine preset. Use "deep", "fast", or empty for auto.
+                  default: ""
+                  enum: ["", "deep", "fast"]
+                skill_profile:
+                  type: string
+                  description: Skill exposure profile used to preview visible skills.
+                  default: react_default
+      responses:
+        "200":
+          description: Route preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  question:
+                    type: string
+                  question_type:
+                    type: string
+                  skill_profile:
+                    type: string
+                  allowed_skills:
+                    type: array
+                    items:
+                      type: string
+                  preferred_skills:
+                    type: array
+                    items:
+                      type: string
+                  discouraged_skills:
+                    type: array
+                    items:
+                      type: string
+                  starter:
+                    type: string
+                  reasons:
+                    type: array
+                    items:
+                      type: string
+                  signals:
+                    type: array
+                    items:
+                      type: string
+        "400":
+          description: Invalid request
   /run:
     post:
       operationId: runDeepResearchAgent
@@ -105,6 +193,10 @@ paths:
                   default: 8
                   minimum: 3
                   maximum: 15
+                skill_profile:
+                  type: string
+                  description: Skill exposure profile used to filter available skills.
+                  default: api_safe
       responses:
         "200":
           description: Successful response
@@ -126,6 +218,9 @@ paths:
                   references_md:
                     type: string
                     description: Markdown reference section
+                  skill_profile:
+                    type: string
+                    description: Resolved skill profile used during execution
                   references:
                     type: array
                     description: Deduplicated references

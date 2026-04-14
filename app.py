@@ -8,15 +8,24 @@ import streamlit as st
 
 from agent import (
     ai_generate, reason, summarize_source, compile_digest,
-    ai_extract, cross_validate, generate_scrape_digest,
+    cross_validate, generate_scrape_digest,
     chat_with_report, run_research, run_url_pipeline,
-    detect_network_mode,
 )
-from config import ENGINE_PRESETS, set_runtime_key
+from config import (
+    ENGINE_PRESETS,
+    PROVIDERS,
+    ROLE_ORDER,
+    clear_runtime_role_orders,
+    get_runtime_role_order,
+    load_secret,
+    set_runtime_key,
+    set_runtime_role_order,
+)
 from skills import BUILTIN_SKILL_REGISTRY
+from skills.config import get_skill_state_map
+from skills.profiles import DEFAULT_SKILL_PROFILE, get_profile_metadata_list
 from tools import (
-    web_search, fetch_page_content, fetch_page_full,
-    deep_scrape, save_scraped, save_report, parse_uploaded_file,
+    web_search, fetch_page_content, save_report, parse_uploaded_file,
 )
 from prompts import TEMPLATES
 
@@ -822,15 +831,15 @@ _defaults = {
     # ── URL 智能提取模式 ──
     "ue_urls":       "",          # 用户输入的 URL 列表（原始字符串）
     "ue_intent":     "",          # 用户提取意图
-    "ue_engine":     "fast",      # 引擎预设："deep" | "fast"
+    "ue_engine":     "",          # 引擎预设："deep" | "fast" | ""(手动路由)
     "ue_schema":     {},          # 主脑生成的字段 Schema
     "ue_items":      [],          # 打工 AI 提取的结构化条目
     "ue_dashboard":  "",          # 看板 AI 生成的 Dashboard JSON
     "ue_log":        [],          # 流水线推理日志
-    "net_mode":          "",      # 网络探测结果："overseas"|"domestic"|""
     "scrape_source_type": "全网综合",
     "scrape_time_range":  "不限",
     "scrape_report":      "",    # 按需生成的综合报告（不再自动触发）
+    "route_mode":         "manual",
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -1092,6 +1101,122 @@ def _render_reference_registry(result: dict) -> None:
             st.markdown(refs_md)
 
 
+def _truncate_text(value: str, limit: int = 48) -> str:
+    text = str(value or "").strip().replace("\n", " ")
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def _format_step_label(tool: str, args: dict, index: int, icon: str) -> str:
+    if tool == "finish":
+        return f"{icon} 步骤 {index}：finish（生成最终答案）"
+
+    if not isinstance(args, dict) or not args:
+        return f"{icon} 步骤 {index}：{tool}"
+
+    if "query" in args:
+        return f"{icon} 步骤 {index}：{tool} · {_truncate_text(args['query'])}"
+    if "url" in args:
+        return f"{icon} 步骤 {index}：{tool} · {_truncate_text(args['url'])}"
+    if "urls" in args:
+        raw_urls = args["urls"]
+        if isinstance(raw_urls, list):
+            count = len(raw_urls)
+        else:
+            count = len([u for u in str(raw_urls).splitlines() if u.strip()])
+        return f"{icon} 步骤 {index}：{tool} · {count} 个 URL"
+    if "instruction" in args:
+        return f"{icon} 步骤 {index}：{tool} · {_truncate_text(args['instruction'])}"
+    if "text" in args:
+        return f"{icon} 步骤 {index}：{tool} · {_truncate_text(args['text'])}"
+
+    return f"{icon} 步骤 {index}：{tool}"
+
+
+def _render_route_debug(route: dict, skill_profile: str) -> None:
+    if not isinstance(route, dict) or not route:
+        return
+
+    with st.expander("🧭 Route Debug", expanded=False):
+        st.caption(
+            f"Profile：`{skill_profile}` | "
+            f"Question Type：`{route.get('question_type', '')}` | "
+            f"Starter：`{route.get('starter', '')}`"
+        )
+
+        preferred = route.get("preferred_skills", []) or []
+        discouraged = route.get("discouraged_skills", []) or []
+        allowed = route.get("allowed_skills", []) or []
+        reasons = route.get("reasons", []) or []
+        signals = route.get("signals", []) or []
+
+        if signals:
+            st.markdown(f"**Signals**: `{signals}`")
+        if preferred:
+            st.markdown(f"**Preferred**: `{preferred}`")
+        if discouraged:
+            st.markdown(f"**Discouraged**: `{discouraged}`")
+        if allowed:
+            st.markdown(f"**Allowed**: `{allowed}`")
+        if reasons:
+            st.markdown("**Reasons**")
+            for reason in reasons:
+                st.markdown(f"- {reason}")
+
+
+def _provider_display_name(name: str) -> str:
+    cfg = PROVIDERS.get(name, {})
+    model = cfg.get("model", "")
+    key_ready = bool(load_secret(cfg.get("env", ""))) if cfg.get("env") else False
+    status = "已配 Key" if key_ready else "未配 Key"
+    model_part = f" · {model}" if model else ""
+    return f"{name}{model_part} · {status}"
+
+
+def _default_provider_for_role(role: str) -> str:
+    current = get_runtime_role_order(role)
+    if current:
+        return current.split(",")[0].strip()
+    order = ROLE_ORDER.get(role, "")
+    if order:
+        return order.split(",")[0].strip()
+    return next(iter(PROVIDERS.keys()), "")
+
+
+def _apply_manual_model_routing(
+    orchestrator: str,
+    worker: str,
+    analyst: str,
+) -> None:
+    st.session_state.ue_engine = ""
+    st.session_state.route_mode = "manual"
+    set_runtime_role_order("orchestrator", [orchestrator])
+    set_runtime_role_order("worker", [worker])
+    set_runtime_role_order("analyst", [analyst])
+
+
+def _apply_preset_model_routing(engine_name: str) -> None:
+    st.session_state.ue_engine = engine_name
+    st.session_state.route_mode = engine_name
+    clear_runtime_role_orders()
+
+
+def _current_model_route_summary() -> tuple[str, str]:
+    engine = st.session_state.get("ue_engine", "")
+    if engine in ENGINE_PRESETS:
+        preset = ENGINE_PRESETS.get(engine, {})
+        return preset.get("label", engine), preset.get("desc", "")
+
+    roles = {
+        "主脑": _default_provider_for_role("orchestrator"),
+        "打工": _default_provider_for_role("worker"),
+        "总结": _default_provider_for_role("analyst"),
+    }
+    detail = " / ".join(f"{label}:{name}" for label, name in roles.items())
+    return "手动模型路由", detail
+
+
 def _render_skill_catalog_sidebar() -> None:
     category_labels = {
         "search": "搜索",
@@ -1100,20 +1225,34 @@ def _render_skill_catalog_sidebar() -> None:
         "rag": "本地 RAG",
         "utility": "整理",
     }
-    grouped = BUILTIN_SKILL_REGISTRY.as_grouped_metadata()
+    enabled_map = get_skill_state_map(BUILTIN_SKILL_REGISTRY.names())
+    grouped = BUILTIN_SKILL_REGISTRY.as_grouped_metadata(enabled_map=enabled_map)
+    enabled_names = [name for name, enabled in enabled_map.items() if enabled]
+    profiles = get_profile_metadata_list(enabled_names)
     total = sum(len(items) for items in grouped.values())
+    enabled_total = sum(1 for items in grouped.values() for item in items if item["enabled"])
 
-    with st.expander(f"🧰 Skills（{total}）", expanded=False):
+    with st.expander(f"🧰 Skills（{enabled_total}/{total} 启用）", expanded=False):
         st.caption("这里展示 ReAct 可调用的内置技能，不包含 `finish` 这类系统控制动作。")
+        if profiles:
+            st.markdown("**Profiles**")
+            for profile in profiles:
+                st.caption(
+                    f"`{profile['name']}` · {profile['allowed_count']} 个 skill · {profile['description']}"
+                )
         for category, items in grouped.items():
-            st.markdown(f"**{category_labels.get(category, category.title())}（{len(items)}）**")
+            enabled_count = sum(1 for item in items if item["enabled"])
+            st.markdown(
+                f"**{category_labels.get(category, category.title())}（{enabled_count}/{len(items)}）**"
+            )
             for item in items:
-                st.markdown(f"- `{item['name']}`: {item['description']}")
+                status = "✅" if item["enabled"] else "⏸️"
+                st.markdown(f"- {status} `{item['name']}`: {item['description']}")
                 required = ", ".join(item["required_args"]) if item["required_args"] else "无"
                 optional = ", ".join(item["optional_args"]) if item["optional_args"] else "无"
                 source_flag = "是" if item["returns_sources"] else "否"
                 st.caption(
-                    f"必填：{required} ｜ 可选：{optional} ｜ 返回来源：{source_flag}"
+                    f"状态：{'启用' if item['enabled'] else '禁用'} ｜ 必填：{required} ｜ 可选：{optional} ｜ 返回来源：{source_flag}"
                 )
 
 
@@ -1122,52 +1261,63 @@ def _render_skill_catalog_sidebar() -> None:
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.markdown("#### 🔬 DeepResearch")
-    if st.button("← 回首页", use_container_width=True):
-        go_home(); st.rerun()
-
-    st.divider()
 
     # ══════════════════════════════════════════
-    # 引擎选择 + 网络自动探测
+    # 模型路由
     # ══════════════════════════════════════════
-    st.markdown("**⚡ 运行引擎**")
+    st.markdown("**🤖 模型路由**")
+    st.caption("填入各家 API Key 后，直接选择每个角色使用哪个模型；不再做海外/国内自动探测。")
 
-    # 网络探测按钮
-    net_mode = st.session_state.get("net_mode", "")
-    net_label = {
-        "overseas": "🟢 海外节点可用",
-        "domestic": "🔴 仅国内直连",
-        "":         "⚪ 未探测",
-    }.get(net_mode, "⚪ 未探测")
-    col_net1, col_net2 = st.columns([2, 1])
-    with col_net1:
-        st.caption(net_label)
-    with col_net2:
-        if st.button("测速", key="probe_net", use_container_width=True):
-            with st.spinner("探测中..."):
-                detected = detect_network_mode()
-            st.session_state.net_mode = detected
-            # 自动切换推荐引擎
-            if detected == "domestic" and st.session_state.ue_engine == "deep":
-                st.session_state.ue_engine = "fast"
-                st.toast("🔴 检测到海外不可达，已自动切换为极速直连模式", icon="⚡")
-            elif detected == "overseas":
-                st.toast("🟢 海外节点可用，可使用深度分析模式", icon="🌟")
-            st.rerun()
+    route_mode = st.radio(
+        "路由模式",
+        ["手动选择模型", "深度分析预设", "极速直连预设"],
+        index={"manual": 0, "deep": 1, "fast": 2}.get(st.session_state.get("route_mode", "manual"), 0),
+        key="route_mode_selector",
+    )
 
-    for eid, epreset in ENGINE_PRESETS.items():
-        is_sel = st.session_state.ue_engine == eid
-        border = "rgba(99,102,241,0.6)" if is_sel else "rgba(255,255,255,0.07)"
-        bg     = "rgba(99,102,241,0.10)" if is_sel else "rgba(255,255,255,0.02)"
-        st.markdown(f"""
-<div style="background:{bg};border:1px solid {border};border-radius:10px;padding:10px 12px;margin-bottom:6px">
-  <div style="font-size:0.85rem;font-weight:700;color:#e2e8f0">{epreset['label']}</div>
-  <div style="font-size:0.73rem;color:#475569;margin-top:2px">{epreset['desc']}</div>
-</div>""", unsafe_allow_html=True)
-        if not is_sel:
-            if st.button(f"切换到此模式", key=f"eng_{eid}", use_container_width=True):
-                st.session_state.ue_engine = eid
-                st.rerun()
+    provider_names = list(PROVIDERS.keys())
+    if route_mode == "手动选择模型":
+        orchestrator_default = st.session_state.get(
+            "route_orchestrator",
+            _default_provider_for_role("orchestrator"),
+        )
+        worker_default = st.session_state.get(
+            "route_worker",
+            _default_provider_for_role("worker"),
+        )
+        analyst_default = st.session_state.get(
+            "route_analyst",
+            _default_provider_for_role("analyst"),
+        )
+
+        orchestrator = st.selectbox(
+            "主脑 / 规划模型",
+            options=provider_names,
+            index=provider_names.index(orchestrator_default) if orchestrator_default in provider_names else 0,
+            key="route_orchestrator",
+            format_func=_provider_display_name,
+        )
+        worker = st.selectbox(
+            "打工 / 抽取模型",
+            options=provider_names,
+            index=provider_names.index(worker_default) if worker_default in provider_names else 0,
+            key="route_worker",
+            format_func=_provider_display_name,
+        )
+        analyst = st.selectbox(
+            "总结 / 报告模型",
+            options=provider_names,
+            index=provider_names.index(analyst_default) if analyst_default in provider_names else 0,
+            key="route_analyst",
+            format_func=_provider_display_name,
+        )
+        _apply_manual_model_routing(orchestrator, worker, analyst)
+    elif route_mode == "深度分析预设":
+        _apply_preset_model_routing("deep")
+        st.caption("保留高质量优先的官方预设顺序。")
+    else:
+        _apply_preset_model_routing("fast")
+        st.caption("保留国内直连优先的官方预设顺序。")
 
     st.divider()
 
@@ -1175,7 +1325,7 @@ with st.sidebar:
     # API Key 管理（防刷爆额度，朋友自填）
     # ══════════════════════════════════════════
     with st.expander("🔑 API Key 配置", expanded=False):
-        st.caption("在此填入 Key 后立即生效，不写入磁盘，刷新页面后失效。")
+        st.caption("建议直接填你自己的 Key，填入后立即生效，不写入磁盘，刷新页面后失效。")
 
         _key_fields = [
             ("GOOGLE_API_KEY",       "Google / Gemini"),
@@ -1188,7 +1338,7 @@ with st.sidebar:
             val = st.text_input(
                 label,
                 type="password",
-                placeholder="sk-…（留空表示使用服务器默认）",
+                placeholder="sk-…（留空则继续使用当前环境已配置值）",
                 key=f"apikey_{env_k}",
             )
             if val and val.strip():
@@ -1241,24 +1391,6 @@ with st.sidebar:
                     except Exception:
                         pass
                     st.rerun()
-
-    st.divider()
-    st.markdown("**🕷️ 手动爬取**")
-    s_url  = st.text_input("网址", placeholder="https://example.com")
-    s_inst = st.text_input("提取内容（可选）")
-    s_deep = st.checkbox("深度爬取（多层级）")
-    if st.button("开始爬取", use_container_width=True, type="primary"):
-        if s_url:
-            with st.spinner("爬取中..."):
-                content = deep_scrape(s_url, 5) if s_deep else fetch_page_full(s_url)[0]
-            if content and not content.startswith("（"):
-                extracted = ai_extract(content, s_inst) if s_inst else ""
-                save_scraped(s_url, content, extracted)
-                st.success("✅ 已保存")
-                if extracted:
-                    st.markdown(extracted)
-            else:
-                st.error("❌ 爬取失败")
 
     st.divider()
     st.markdown("**📁 已保存文件**")
@@ -2099,18 +2231,17 @@ elif st.session_state.mode == "url_extract":
             "📰 新闻事件":  "从这些新闻页面提取事件标题、发生时间、核心内容摘要、涉及主体和关键数据。",
         }
 
-        # ── 当前引擎徽章 ──
-        cur_engine  = st.session_state.ue_engine
-        cur_preset  = ENGINE_PRESETS.get(cur_engine, {})
+        # ── 当前模型路由徽章 ──
+        route_title, route_desc = _current_model_route_summary()
         engine_html = (
             f'<span style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.35);'
             f'border-radius:100px;padding:3px 12px;font-size:0.75rem;font-weight:700;color:#a5b4fc">'
-            f'{cur_preset.get("label","默认引擎")}</span>'
+            f'{route_title}</span>'
         )
         st.markdown(
             f'<div style="margin-bottom:12px">{engine_html} '
             f'<span style="font-size:0.75rem;color:#334155;margin-left:6px">'
-            f'可在左侧侧边栏切换引擎或测速</span></div>',
+            f'{route_desc}</span></div>',
             unsafe_allow_html=True,
         )
 
@@ -2164,12 +2295,12 @@ elif st.session_state.mode == "url_extract":
         urls   = [u.strip() for u in st.session_state.ue_urls.splitlines() if u.strip().startswith("http")]
         intent = st.session_state.ue_intent
         engine = st.session_state.ue_engine
-        preset = ENGINE_PRESETS.get(engine, {})
+        route_title, _ = _current_model_route_summary()
 
         st.markdown(f"""
 <div style="margin-bottom:16px">
   <div style="font-size:1.2rem;font-weight:700;color:#f1f5f9;margin-bottom:4px">
-    ⚡ 流水线运行中 · {preset.get('label','默认引擎')}
+    ⚡ 流水线运行中 · {route_title}
   </div>
   <div style="font-size:0.82rem;color:#475569">
     {len(urls)} 个 URL · {intent[:60]}{'...' if len(intent) > 60 else ''}
@@ -2222,7 +2353,7 @@ elif st.session_state.mode == "url_extract":
         intent    = st.session_state.ue_intent
         log       = st.session_state.ue_log
         engine    = st.session_state.ue_engine
-        preset    = ENGINE_PRESETS.get(engine, {})
+        route_title, _ = _current_model_route_summary()
 
         # 顶部概览
         fields     = schema.get("fields", [])
@@ -2233,7 +2364,7 @@ elif st.session_state.mode == "url_extract":
   <div class="stat-chip">🌐 URL 数 <span class="val">{urls_count}</span></div>
   <div class="stat-chip">📋 字段数 <span class="val">{len(fields)}</span></div>
   <div class="stat-chip">🎯 对象 <span class="val">{schema.get('target_object','—')}</span></div>
-  <div class="stat-chip">⚡ 引擎 <span class="val">{preset.get('label','默认')}</span></div>
+  <div class="stat-chip">🤖 模型路由 <span class="val">{route_title}</span></div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -2349,6 +2480,23 @@ elif st.session_state.mode == "agent":
         else:
             st.caption("输入你的问题，Agent 会自主规划：搜索、爬取网页、检索本地文档……逐步推理，直到给出完整答案。")
 
+        if is_planner:
+            selected_profile = "planner"
+            st.caption("Skill Profile：`planner`（固定，限制深度与批量爬取以控制子问题收敛）")
+        else:
+            profile_options = [DEFAULT_SKILL_PROFILE, "web_research_heavy"]
+            selected_profile = st.selectbox(
+                "Skill Profile",
+                options=profile_options,
+                index=0,
+                key="agent_skill_profile_select",
+                format_func=lambda profile: {
+                    "react_default": "react_default · 平衡模式",
+                    "web_research_heavy": "web_research_heavy · 网页研究增强",
+                }.get(profile, profile),
+                help="平衡模式更克制；网页研究增强会开放 batch/deep crawl 这类网页能力。",
+            )
+
         question = st.text_area(
             "你的问题",
             placeholder=(
@@ -2377,6 +2525,7 @@ elif st.session_state.mode == "agent":
             st.session_state.agent_question_submitted = question.strip()
             st.session_state.agent_max_steps          = int(max_steps)
             st.session_state.agent_is_planner         = is_planner
+            st.session_state.agent_skill_profile      = selected_profile
             st.session_state.phase                    = "running"
             st.rerun()
 
@@ -2386,9 +2535,14 @@ elif st.session_state.mode == "agent":
         max_steps  = st.session_state.get("agent_max_steps", 8)
         engine     = st.session_state.get("ue_engine", "")
         is_planner = st.session_state.get("agent_is_planner", False)
+        skill_profile = st.session_state.get(
+            "agent_skill_profile",
+            "planner" if is_planner else DEFAULT_SKILL_PROFILE,
+        )
 
         mode_label = "🗺️ 深度规划" if is_planner else "🤖 ReAct 自主"
         st.markdown(f"### {mode_label} 正在处理：{question}")
+        st.caption(f"Skill Profile：`{skill_profile}`")
 
         status_box = st.empty()
 
@@ -2471,10 +2625,12 @@ elif st.session_state.mode == "agent":
                     engine=engine,
                     max_steps=max_steps,
                     progress_callback=_progress,
+                    skill_profile=skill_profile,
                 )
             status_box.empty()
 
             # 展示每步过程
+            _render_route_debug(result.get("route", {}), skill_profile)
             steps = result.get("steps", [])
             if steps:
                 st.markdown("#### 推理步骤")
@@ -2496,7 +2652,12 @@ elif st.session_state.mode == "agent":
                         "rag_retrieve": "📂",
                         "finish":       "🏁",
                     }.get(step.get("tool", ""), "🔧")
-                    label = f"{tool_icon} 步骤 {i}：{step.get('tool', '')}({step.get('args', {})})"
+                    label = _format_step_label(
+                        step.get("tool", ""),
+                        step.get("args", {}) or {},
+                        i,
+                        tool_icon,
+                    )
                     with st.expander(label, expanded=False):
                         st.markdown(f"**💭 思考**\n\n{step.get('thought', '')}")
                         obs = step.get("observation", "")
@@ -2512,9 +2673,9 @@ elif st.session_state.mode == "agent":
 
             # 最终答案
             st.divider()
-            st.markdown("#### 📋 最终答案")
             answer = result.get("answer", "")
-            st.markdown(answer)
+            with st.expander("📋 最终答案", expanded=True):
+                st.markdown(answer)
 
             # 操作按钮
             st.divider()

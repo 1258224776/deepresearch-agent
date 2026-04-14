@@ -8,6 +8,8 @@
 #   model:             模型 ID
 #   type:              google | anthropic | openai_compat
 #   base_url:          openai_compat 类型必填
+#   native_tools:      是否参与原生工具调用；false 时仅用于普通生成/JSON 回退
+#   tool_choice:       原生工具调用策略，常见值：required / auto
 #   structured_output: true = 启用原生 JSON 模式；false = 依赖 prompt 约束
 
 providers:
@@ -45,6 +47,8 @@ providers:
     model: glm-5
     base_url: https://open.bigmodel.cn/api/paas/v4/
     type: openai_compat
+    native_tools: false
+    tool_choice: auto
     structured_output: false
 
   glm:
@@ -52,6 +56,8 @@ providers:
     model: glm-4-flash
     base_url: https://open.bigmodel.cn/api/paas/v4/
     type: openai_compat
+    native_tools: false
+    tool_choice: auto
     structured_output: false
 
   minimax:

@@ -20,9 +20,9 @@ except ImportError:
     _ANT = None
 
 from config import (
-    PROVIDERS, ROLE_ORDER, ENGINE_PRESETS,
+    PROVIDERS, get_effective_role_order,
     FETCH_WORKERS, WORKER_THREADS, CHUNK_SIZE, JITTER_RANGE,
-    NETWORK_PROBE_TIMEOUT, SEARCH_MAX_RESULTS, SEARCH_MAX_QUERIES,
+    SEARCH_MAX_RESULTS, SEARCH_MAX_QUERIES,
     load_secret,
 )
 from prompts import (
@@ -93,27 +93,6 @@ def extract_json(text: str):
         pass
 
     return None
-
-
-# ══════════════════════════════════════════════
-# 网络探测：自动识别是否能访问海外 API
-# ══════════════════════════════════════════════
-
-def detect_network_mode() -> str:
-    """
-    探测是否能连通 Google API 端点。
-    返回 'overseas'（可以） 或 'domestic'（不行，需用国内通道）。
-    """
-    import socket
-    try:
-        sock = socket.create_connection(
-            ("generativelanguage.googleapis.com", 443),
-            timeout=NETWORK_PROBE_TIMEOUT,
-        )
-        sock.close()
-        return "overseas"
-    except Exception:
-        return "domestic"
 
 
 # ══════════════════════════════════════════════
@@ -227,8 +206,7 @@ def ai_generate_role(prompt: str, system: str = "",
     按角色 + 引擎预设路由选择提供商列表，再调用 ai_generate。
     engine: "deep" | "fast" | "" (空=用默认 ROLE_ORDER)
     """
-    preset = ENGINE_PRESETS.get(engine, {})
-    order_str = preset.get(role, "") or ROLE_ORDER.get(role, "")
+    order_str = get_effective_role_order(role, engine)
     if not order_str:
         return ai_generate(prompt, system, structured=structured)
     order = [p.strip() for p in order_str.split(",")]
@@ -387,15 +365,18 @@ def _call_provider_tool(
         model=model,
         messages=messages_oai,
         tools=oai_tools,
-        tool_choice="required",
+        tool_choice=cfg.get("tool_choice", "required"),
     )
     msg = resp.choices[0].message
     thought = msg.content or ""
-    if msg.tool_calls:
+    if getattr(msg, "tool_calls", None):
         tc = msg.tool_calls[0]
         import json as _json_mod
         return tc.function.name, _json_mod.loads(tc.function.arguments), thought
-    raise RuntimeError("OpenAI 兼容接口未返回 tool_calls")
+    raise RuntimeError(
+        f"OpenAI 兼容接口未返回 tool_calls（provider={cfg.get('model', '')}, "
+        f"tool_choice={cfg.get('tool_choice', 'required')}）"
+    )
 
 
 def ai_tool_call(
@@ -410,8 +391,7 @@ def ai_tool_call(
     按 engine/role 路由提供商列表，依次尝试，返回 (tool_name, args, thought)。
     全部失败时抛出 RuntimeError（调用方降级到 JSON 解析模式）。
     """
-    preset = ENGINE_PRESETS.get(engine, {})
-    order_str = preset.get(role, "") or ROLE_ORDER.get(role, "")
+    order_str = get_effective_role_order(role, engine)
     if not order_str:
         order_str = "google_pro,claude_opus,glm_pro,minimax,siliconflow_pro"
     order = [p.strip() for p in order_str.split(",")]
@@ -420,6 +400,9 @@ def ai_tool_call(
     for pname in order:
         cfg = PROVIDERS.get(pname)
         if not cfg:
+            continue
+        if not cfg.get("native_tools", True):
+            print(f"[NativeCall] {pname} 跳过: native_tools=false")
             continue
         try:
             result = _call_provider_tool(pname, cfg, prompt, system, tools)

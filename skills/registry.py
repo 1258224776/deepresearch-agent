@@ -61,7 +61,7 @@ class SkillRegistry:
             for name, skill in self._skills.items()
         }
 
-    def as_metadata_list(self) -> list[dict]:
+    def as_metadata_list(self, enabled_map: dict[str, bool] | None = None) -> list[dict]:
         items: list[dict] = []
         for name, skill in self._skills.items():
             spec = skill.spec
@@ -74,6 +74,7 @@ class SkillRegistry:
                     "optional_args": list(spec.optional_args),
                     "args_desc": dict(spec.args_desc),
                     "returns_sources": spec.returns_sources,
+                    "enabled": True if enabled_map is None else enabled_map.get(name, True),
                 }
             )
         return sorted(
@@ -85,9 +86,12 @@ class SkillRegistry:
             ),
         )
 
-    def as_grouped_metadata(self) -> dict[str, list[dict]]:
+    def as_grouped_metadata(
+        self,
+        enabled_map: dict[str, bool] | None = None,
+    ) -> dict[str, list[dict]]:
         grouped: dict[str, list[dict]] = {}
-        for item in self.as_metadata_list():
+        for item in self.as_metadata_list(enabled_map=enabled_map):
             grouped.setdefault(item["category"], []).append(item)
         return grouped
 

@@ -17,7 +17,10 @@ from prompts import prompt_react_system
 from report import CitationRegistry, Observation, QuestionType, classify_question, compose_report
 from skills import BUILTIN_SKILL_REGISTRY
 from skills.base import SkillContext
-from skills.router import check_loop, route_entry, suggest_next_step
+from skills.config import get_enabled_skill_names
+from skills.guidance import get_guidance_for_skills
+from skills.profiles import DEFAULT_SKILL_PROFILE, get_profile_allowlist
+from skills.router import build_route_decision, check_loop, suggest_next_step
 
 
 MAX_PARSE_RETRIES = 2
@@ -254,6 +257,7 @@ def run_agent(
     compose: bool = True,
     use_router: bool = True,
     question_type: QuestionType | None = None,
+    skill_profile: str = DEFAULT_SKILL_PROFILE,
 ) -> dict:
     """
     ReAct Agent 主入口。
@@ -269,37 +273,61 @@ def run_agent(
         {
             "answer": str, "steps": list[dict], "observations": list[dict],
             "registry": CitationRegistry, "question_type": str,
-            "allowed_skills": list[str], "step_count": int, "error": str | None,
+            "allowed_skills": list[str], "route": dict, "step_count": int, "error": str | None,
         }
     """
     history: list[dict] = []
     observations: list[Observation] = []
     if registry is None:
         registry = CitationRegistry()
+    enabled_skills = get_enabled_skill_names(SKILL_REGISTRY.names())
+    resolved_profile, profile_skills = get_profile_allowlist(skill_profile, enabled_skills)
 
     # ── 入口预路由（Stage 1） ──
     if use_router:
         qtype = question_type or classify_question(question, engine)
-        route = route_entry(qtype, BUILTIN_SKILL_REGISTRY.names())
-        allowed_skills = route.allowed_skills
+        route = build_route_decision(
+            qtype,
+            profile_skills,
+            question=question,
+            profile_name=resolved_profile,
+        )
+        allowed_skills = route.allowed
         starter_hint = route.starter
+        preferred_skills = route.preferred
+        discouraged_skills = route.discouraged
+        route_reasons = route.reasons
         if progress_callback:
             progress_callback(
-                f"🧭 预路由：问题类型 = {qtype.value}，"
-                f"候选工具 = {allowed_skills}，起手 = {starter_hint}"
+                f"🧭 预路由：profile = {resolved_profile}，问题类型 = {qtype.value}，"
+                f"候选工具 = {allowed_skills}，优先 = {preferred_skills}，起手 = {starter_hint}"
             )
     else:
         qtype = question_type or QuestionType.RESEARCH
-        allowed_skills = [n for n in TOOLS.keys() if n != FINISH_TOOL_NAME]
+        allowed_skills = profile_skills
         starter_hint = ""
+        preferred_skills = []
+        discouraged_skills = []
+        route_reasons = []
+        route = None
 
     # Stage 2：按白名单过滤工具字典（finish 恒保留）
     allow_set = set(allowed_skills) | {FINISH_TOOL_NAME}
-    effective_tools = {k: v for k, v in TOOLS.items() if k in allow_set}
+    ordered_tool_names = [name for name in allowed_skills if name in TOOLS]
+    ordered_tool_names.append(FINISH_TOOL_NAME)
+    effective_tools = {
+        name: TOOLS[name]
+        for name in ordered_tool_names
+        if name in allow_set and name in TOOLS
+    }
     system = prompt_react_system(
         effective_tools,
         allowed_skills=allowed_skills,
         starter_hint=starter_hint,
+        preferred_skills=preferred_skills,
+        discouraged_skills=discouraged_skills,
+        route_reasons=route_reasons,
+        skill_guidance=get_guidance_for_skills(allowed_skills),
     )
 
     force_finish_next = False
@@ -427,7 +455,9 @@ def run_agent(
                     "observations": [o.model_dump() for o in observations],
                     "registry": registry,
                     "question_type": qtype.value,
+                    "skill_profile": resolved_profile,
                     "allowed_skills": allowed_skills,
+                    "route": route.as_dict() if route is not None else {},
                     "step_count": step_num + 1,
                     "error": None,
                 }
@@ -491,7 +521,9 @@ def run_agent(
             "observations": [o.model_dump() for o in observations],
             "registry": registry,
             "question_type": qtype.value,
+            "skill_profile": resolved_profile,
             "allowed_skills": allowed_skills,
+            "route": route.as_dict() if route is not None else {},
             "step_count": max_steps,
             "error": None,
         }
@@ -503,7 +535,9 @@ def run_agent(
             "observations": [o.model_dump() for o in observations],
             "registry": registry,
             "question_type": qtype.value if use_router else "research",
+            "skill_profile": resolved_profile,
             "allowed_skills": allowed_skills,
+            "route": route.as_dict() if route is not None else {},
             "step_count": len(history),
             "error": traceback.format_exc(),
         }

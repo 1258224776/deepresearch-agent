@@ -427,7 +427,8 @@ def prompt_aggregation_report(items_md: str, question: str, total: int) -> str:
 # ReAct Agent 系统提示
 # ══════════════════════════════════════════════
 
-def prompt_react_system(
+'''Legacy ReAct prompt removed. Keep this block inert until it is deleted in a later cleanup.
+def _prompt_react_system_legacy_unused(
     tools: dict | None = None,
     allowed_skills: list[str] | None = None,
     starter_hint: str = "",
@@ -513,6 +514,115 @@ def prompt_react_system(
 # ══════════════════════════════════════════════
 # Planner Agent — 规划器 & 报告器 Prompt
 # ══════════════════════════════════════════════
+
+'''
+def prompt_react_system(
+    tools: dict | None = None,
+    allowed_skills: list[str] | None = None,
+    starter_hint: str = "",
+    preferred_skills: list[str] | None = None,
+    discouraged_skills: list[str] | None = None,
+    route_reasons: list[str] | None = None,
+    skill_guidance: dict[str, dict[str, str]] | None = None,
+) -> str:
+    """RouteDecision-aware ReAct system prompt."""
+
+    def _tool_arg_text(info: dict) -> str:
+        required = list(info.get("args", []))
+        optional = list(info.get("optional_args", []))
+        parts = []
+        if required:
+            parts.append(f"必填：{required}")
+        if optional:
+            parts.append(f"可选：{optional}")
+        return "；".join(parts) if parts else "无参数"
+
+    if tools:
+        if allowed_skills is not None:
+            allow_set = set(allowed_skills) | {"finish"}
+            effective = {k: v for k, v in tools.items() if k in allow_set}
+        else:
+            effective = tools
+
+        lines = []
+        for name, info in effective.items():
+            lines.append(f'  - "{name}": {info["desc"]} 参数：{_tool_arg_text(info)}')
+            args_desc = info.get("args_desc") or {}
+            for key, value in args_desc.items():
+                lines.append(f"      - {key}：{value}")
+        tool_lines = "\n".join(lines)
+    else:
+        tool_lines = (
+            '  - "search": 搜索网络，必填：["query"]\n'
+            '  - "scrape": 抓取指定 URL 的完整正文内容，必填：["url"]\n'
+            '  - "rag_retrieve": 从用户已上传的本地文档中语义检索，必填：["query"]\n'
+            '  - "finish": 信息已足够，输出最终答案，必填：["answer"]'
+        )
+
+    starter_block = ""
+    if starter_hint:
+        starter_block = (
+            f"\n## 起手建议\n"
+            f"根据当前路由判断，第一步建议优先调用 **{starter_hint}**；"
+            f"如有更合适的工具，请在 thought 中说明理由再切换。\n"
+        )
+
+    route_lines: list[str] = []
+    if preferred_skills:
+        route_lines.append(f"- 优先考虑：{preferred_skills}")
+    if discouraged_skills:
+        route_lines.append(f"- 尽量避免先手：{discouraged_skills}")
+    if route_reasons:
+        route_lines.extend(f"- {reason}" for reason in route_reasons[:4] if reason)
+    route_block = ""
+    if route_lines:
+        route_block = "\n## 路由提示\n" + "\n".join(route_lines) + "\n"
+
+    guidance_lines: list[str] = []
+    if skill_guidance:
+        for name, item in skill_guidance.items():
+            when = item.get("when", "").strip()
+            avoid = item.get("avoid", "").strip()
+            next_hint = item.get("next", "").strip()
+            parts = []
+            if when:
+                parts.append(f"何时用：{when}")
+            if avoid:
+                parts.append(f"避免：{avoid}")
+            if next_hint:
+                parts.append(f"常见下一步：{next_hint}")
+            if parts:
+                guidance_lines.append(f"- `{name}`: " + "；".join(parts))
+    guidance_block = ""
+    if guidance_lines:
+        guidance_block = "\n## Skill Guidance\n" + "\n".join(guidance_lines) + "\n"
+
+    return f"""你是一个 ReAct（推理 + 行动）Agent。你的工作方式是：反复思考 -> 调用工具 -> 观察结果 -> 再思考，直到你认为信息足够，再输出最终答案。
+## 可用工具
+{tool_lines}
+{starter_block}{route_block}{guidance_block}## 输出格式（严格遵守）
+每次只输出一个 JSON 对象，不要有任何其他内容、解释或 markdown 代码块：
+{{"thought": "你的推理过程，解释为什么选择这个工具和参数", "tool": "工具名", "args": {{"参数名": "参数值"}}}}
+
+当你认为已收集到足够信息时，调用 finish：
+{{"thought": "信息已充足，整理答案", "tool": "finish", "args": {{"answer": "完整的最终答案（Markdown 格式）"}}}}
+
+## 注意事项
+- 每次只输出一个 JSON，不要一次输出多步
+- thought 字段要真实反映你的推理逻辑
+- 只能从「可用工具」里选，不要调用未列出的工具
+- 优先搜索再抓取，不要重复搜索相同关键词
+- 当单一关键词结果噪声较大、需要换角度并行检索时，优先考虑 `search_multi`
+- 遇到“最近 / 最新 / 近一周 / 近一月”这类问题时，优先考虑 `search_recent`
+- 遇到“新闻 / 发布 / 公告 / 动态 / 进展”这类问题时，优先考虑 `search_news`
+- 遇到“官方文档 / API / reference / guide / 手册 / 开发者文档”时，优先考虑 `search_docs`
+- 遇到“公司官网 / 投资者关系 / 公告 / 财报 / press release / 品牌官方信息”时，优先考虑 `search_company`
+- 在目录页、首页、文档导航页上先找可跟进链接时，优先考虑 `extract_links`
+- 当手头已有多个 URL 需要统一抓取时，优先考虑 `scrape_batch`
+- 当需要沿同域页面继续深入官网、文档站或博客时，优先考虑 `scrape_deep`
+- 如果用户上传了文档，优先使用 `rag_retrieve` 检索本地内容
+- 最终答案（answer）要完整、结构清晰，使用 Markdown 格式"""
+
 
 def prompt_plan_research(question: str) -> str:
     """

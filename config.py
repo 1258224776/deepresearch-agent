@@ -90,6 +90,8 @@ _PROVIDERS_DEFAULT: dict[str, dict] = {
         "model":             "glm-5",
         "base_url":          "https://open.bigmodel.cn/api/paas/v4/",
         "type":              "openai_compat",
+        "native_tools":      False,
+        "tool_choice":       "auto",
         "structured_output": False,
     },
     # 智谱 GLM —— 打工：GLM-4-Flash（毫秒级响应，高并发友好）
@@ -98,6 +100,8 @@ _PROVIDERS_DEFAULT: dict[str, dict] = {
         "model":             "glm-4-flash",
         "base_url":          "https://open.bigmodel.cn/api/paas/v4/",
         "type":              "openai_compat",
+        "native_tools":      False,
+        "tool_choice":       "auto",
         "structured_output": False,
     },
 
@@ -198,11 +202,8 @@ WORKER_THREADS = 10
 # ── Worker 并发限速：每次请求前随机延迟范围（秒） ──
 JITTER_RANGE = (0.05, 0.3)
 
-# ── 网络探测超时（秒） ──
-NETWORK_PROBE_TIMEOUT = 4
-
-
 _secret_cache: dict[str, str] = {}
+_runtime_role_order: dict[str, str] = {}
 
 
 def load_secret(key: str) -> str:
@@ -230,3 +231,33 @@ def set_runtime_key(env_key: str, value: str) -> None:
     if value and value.strip():
         _secret_cache[env_key] = value.strip()
         os.environ[env_key] = value.strip()
+
+
+def set_runtime_role_order(role: str, providers: list[str] | str) -> None:
+    """在当前进程内覆盖某个角色的 provider 顺序。"""
+    if isinstance(providers, str):
+        order = ",".join(p.strip() for p in providers.split(",") if p.strip())
+    else:
+        order = ",".join(str(p).strip() for p in providers if str(p).strip())
+    if order:
+        _runtime_role_order[role] = order
+    else:
+        _runtime_role_order.pop(role, None)
+
+
+def get_runtime_role_order(role: str) -> str:
+    return _runtime_role_order.get(role, "")
+
+
+def clear_runtime_role_orders() -> None:
+    _runtime_role_order.clear()
+
+
+def get_effective_role_order(role: str, engine: str = "") -> str:
+    preset = ENGINE_PRESETS.get(engine, {})
+    if preset.get(role, ""):
+        return preset.get(role, "")
+    runtime = get_runtime_role_order(role)
+    if runtime:
+        return runtime
+    return ROLE_ORDER.get(role, "")

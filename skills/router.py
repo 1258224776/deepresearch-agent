@@ -1,44 +1,27 @@
 """
-skills/router.py —— ReAct 工具路由层
+Routing helpers for the ReAct skill loop.
 
-把"给 LLM 看所有 14 个工具"改成"按问题类型和对话状态按需呈现"。
-分四层递进：
-
-  1. 入口预路由（route_entry）
-     根据 classify_question 的结果，返回本次对话的 skill 白名单 + 起手 skill
-     让 LLM 在 ReAct 的每一步只看到相关工具，减少选择噪音。
-
-  2. 候选 shortlist（build_shortlist_prompt）
-     把白名单渲染进系统提示，附上"起手建议"和可选参数说明。
-
-  3. 步间状态路由（suggest_next_step）
-     根据上一步 observation / step 数 / 已登记来源数，
-     追加一段"建议下一步考虑 X / Y"的动态提示，不强制但强引导。
-
-  4. 重复 / 误选纠偏（check_loop）
-     检测到重复调用同一 (tool, key_arg)、或连续 N 步无新来源时，
-     注入硬警告或强制 finish。
+This module now has two layers:
+1. entry routing / route preview
+2. step-level nudges and loop guards
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import TYPE_CHECKING
 
-from report import QuestionType
+from report import QuestionType, classify_question
 
 if TYPE_CHECKING:
     from report import CitationRegistry
 
 
-# ══════════════════════════════════════════════
-# 1. 入口预路由：问题类型 → skill 白名单 + 起手
-# ══════════════════════════════════════════════
-
-# finish 恒定在白名单里，不需要重复列
 _ALWAYS_ALLOWED = {"finish"}
+_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
-# 每种问题类型配一套 skill 白名单（按相关性排序，起手靠前）
+
 ROUTE_MAP: dict[QuestionType, list[str]] = {
     QuestionType.FACTUAL: [
         "search", "rag_retrieve", "search_site", "scrape",
@@ -64,7 +47,6 @@ ROUTE_MAP: dict[QuestionType, list[str]] = {
     QuestionType.FINANCIAL: [
         "search_company", "search_docs", "search", "scrape", "extract",
     ],
-    # RESEARCH 兜底 → 全开
     QuestionType.RESEARCH: [
         "search", "search_multi", "search_news", "search_site",
         "search_company", "search_docs", "search_recent",
@@ -73,62 +55,258 @@ ROUTE_MAP: dict[QuestionType, list[str]] = {
     ],
 }
 
-# 每种类型的起手推荐（LLM 第一步优先选这个）
 STARTER_MAP: dict[QuestionType, str] = {
-    QuestionType.FACTUAL:   "search",
-    QuestionType.LIST:      "search_multi",
-    QuestionType.COMPARE:   "search_multi",
-    QuestionType.TREND:     "search_news",
-    QuestionType.TIMELINE:  "search_news",
-    QuestionType.ANALYSIS:  "search_multi",
+    QuestionType.FACTUAL: "search",
+    QuestionType.LIST: "search_multi",
+    QuestionType.COMPARE: "search_multi",
+    QuestionType.TREND: "search_news",
+    QuestionType.TIMELINE: "search_news",
+    QuestionType.ANALYSIS: "search_multi",
     QuestionType.RECOMMEND: "search_multi",
     QuestionType.FINANCIAL: "search_company",
-    QuestionType.RESEARCH:  "search",
+    QuestionType.RESEARCH: "search",
 }
+
+_SIGNAL_PRIORITY_MAP: dict[str, list[str]] = {
+    "docs": ["search_docs", "search_site", "extract_links", "scrape_deep", "scrape", "extract"],
+    "company": ["search_company", "search_recent", "search_news", "scrape", "extract"],
+    "news": ["search_news", "search_recent", "search", "scrape"],
+    "site": ["search_site", "scrape", "extract_links"],
+    "entry_url": ["extract_links", "scrape", "scrape_batch", "scrape_deep", "extract"],
+}
+
+_SIGNAL_PREFERRED_MAP: dict[str, list[str]] = {
+    "docs": ["search_docs", "search_site", "extract_links"],
+    "company": ["search_company", "search_recent", "search_news"],
+    "news": ["search_news", "search_recent"],
+    "site": ["search_site", "scrape"],
+    "entry_url": ["extract_links", "scrape"],
+}
+
+_SIGNAL_DISCOURAGED_MAP: dict[str, list[str]] = {
+    "docs": ["search_news", "search_company"],
+    "company": ["search_docs"],
+    "news": ["search_docs", "search_company"],
+    "site": ["search_multi"],
+    "entry_url": ["search_multi", "search_news"],
+}
+
+_STRONG_SIGNALS: tuple[str, ...] = ("site", "entry_url")
+
+_QUESTION_TYPE_DISCOURAGED: dict[QuestionType, list[str]] = {
+    QuestionType.FACTUAL: ["search_news", "scrape_deep", "scrape_batch"],
+    QuestionType.LIST: ["search_news"],
+    QuestionType.COMPARE: ["search_news"],
+    QuestionType.TREND: ["search_docs"],
+    QuestionType.TIMELINE: ["search_docs"],
+    QuestionType.ANALYSIS: ["search_news"],
+    QuestionType.RECOMMEND: ["search_news"],
+    QuestionType.FINANCIAL: ["scrape_deep", "scrape_batch"],
+    QuestionType.RESEARCH: [],
+}
+
+_DOC_KEYWORDS = (
+    "api", "sdk", "guide", "manual", "reference", "documentation", "docs",
+    "开发者", "文档", "官方文档", "参考", "指南", "手册", "接口",
+)
+_COMPANY_KEYWORDS = (
+    "财报", "投资者关系", "investor relations", "earnings", "press release",
+    "年报", "季报", "官网", "公告", "ir", "股东信",
+)
+_NEWS_KEYWORDS = (
+    "最新", "最近", "近期", "动态", "新闻", "发布", "进展", "本周", "本月",
+    "today", "latest", "recent", "update", "updates", "announcement", "announcements",
+)
+
+
+def _dedupe_keep_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in items:
+        name = str(item).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        deduped.append(name)
+    return deduped
+
+
+def _move_to_front(items: list[str], preferred: list[str]) -> list[str]:
+    return _dedupe_keep_order(preferred + items)
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in keywords)
+
+
+def _detect_route_signals(question: str) -> list[str]:
+    text = question.strip()
+    lowered = text.lower()
+    signals: list[str] = []
+
+    if _contains_any(lowered, _DOC_KEYWORDS):
+        signals.append("docs")
+    if _contains_any(lowered, _COMPANY_KEYWORDS):
+        signals.append("company")
+    if _contains_any(lowered, _NEWS_KEYWORDS):
+        signals.append("news")
+    if "site:" in lowered or re.search(r"\b[a-z0-9-]+\.[a-z]{2,}\b", lowered):
+        signals.append("site")
+    if _URL_RE.search(text):
+        signals.append("entry_url")
+
+    return _dedupe_keep_order(signals)
+
+
+def _signal_reason(signal: str) -> str:
+    reasons = {
+        "docs": "命中文档/API 关键词，优先官方文档检索与同站抓取。",
+        "company": "命中公司/财报/IR 关键词，优先官网与投资者关系信息。",
+        "news": "命中最新/动态/发布类表达，优先新闻与近期搜索。",
+        "site": "问题限定了站点或域名，优先站内检索与同域抓取。",
+        "entry_url": "问题里已提供 URL，优先直接抓入口页或先抽候选链接。",
+    }
+    return reasons.get(signal, "")
 
 
 @dataclass(slots=True)
 class EntryRoute:
-    """入口预路由的产物。"""
     qtype: QuestionType
-    allowed_skills: list[str]          # 不含 finish，prompt 渲染时由调用方追加
-    starter: str                       # 建议的起手 skill
+    allowed_skills: list[str]
+    starter: str
 
     def allowed_with_finish(self) -> list[str]:
         return [*self.allowed_skills, "finish"]
 
 
+@dataclass(slots=True)
+class RouteDecision:
+    qtype: QuestionType
+    allowed: list[str] = field(default_factory=list)
+    preferred: list[str] = field(default_factory=list)
+    discouraged: list[str] = field(default_factory=list)
+    starter: str = ""
+    reasons: list[str] = field(default_factory=list)
+    signals: list[str] = field(default_factory=list)
+
+    def allowed_with_finish(self) -> list[str]:
+        return [*self.allowed, "finish"]
+
+    def as_dict(self) -> dict:
+        return {
+            "question_type": self.qtype.value,
+            "allowed_skills": list(self.allowed),
+            "preferred_skills": list(self.preferred),
+            "discouraged_skills": list(self.discouraged),
+            "starter": self.starter,
+            "reasons": list(self.reasons),
+            "signals": list(self.signals),
+        }
+
+
+def build_route_decision(
+    qtype: QuestionType,
+    available_skills: list[str],
+    *,
+    question: str = "",
+    profile_name: str = "",
+) -> RouteDecision:
+    visible = _dedupe_keep_order([name for name in available_skills if name not in _ALWAYS_ALLOWED])
+    visible_set = set(visible)
+    signals = _detect_route_signals(question)
+
+    ordered = list(ROUTE_MAP.get(qtype, ROUTE_MAP[QuestionType.RESEARCH]))
+    preferred: list[str] = []
+    discouraged: list[str] = list(_QUESTION_TYPE_DISCOURAGED.get(qtype, []))
+    reasons = [f"问题分类命中 `{qtype.value}`。"]
+    if profile_name:
+        reasons.append(f"当前 skill profile 为 `{profile_name}`。")
+
+    for signal in signals:
+        ordered = _move_to_front(ordered, _SIGNAL_PRIORITY_MAP.get(signal, []))
+        preferred.extend(_SIGNAL_PREFERRED_MAP.get(signal, []))
+        discouraged.extend(_SIGNAL_DISCOURAGED_MAP.get(signal, []))
+        reason = _signal_reason(signal)
+        if reason:
+            reasons.append(reason)
+
+    filtered = [name for name in _dedupe_keep_order(ordered) if name in visible_set]
+    if not filtered:
+        filtered = list(visible)
+        if filtered:
+            reasons.append("题型推荐技能当前都不可见，已回退到当前 profile 可见技能全集。")
+    else:
+        missing = [name for name in _dedupe_keep_order(ordered) if name not in visible_set]
+        if missing:
+            reasons.append(f"以下推荐技能被当前 profile 或 enabled 配置过滤：{missing[:5]}")
+
+    preferred_filtered = [name for name in _dedupe_keep_order(preferred) if name in filtered]
+    if not preferred_filtered:
+        preferred_filtered = filtered[: min(3, len(filtered))]
+
+    for signal in _STRONG_SIGNALS:
+        if signal in signals:
+            filtered = _dedupe_keep_order(_SIGNAL_PRIORITY_MAP.get(signal, []) + filtered)
+            preferred_filtered = _dedupe_keep_order(
+                _SIGNAL_PREFERRED_MAP.get(signal, []) + preferred_filtered
+            )
+            reasons.append(f"强信号 `{signal}` 覆盖了较弱的词义信号排序。")
+
+    filtered = _dedupe_keep_order(preferred_filtered + filtered)
+
+    discouraged_filtered = [
+        name for name in _dedupe_keep_order(discouraged)
+        if name in visible_set and name not in preferred_filtered
+    ][:4]
+
+    starter = STARTER_MAP.get(qtype, "search")
+    if preferred_filtered:
+        starter = preferred_filtered[0]
+    elif starter not in visible_set or starter not in filtered:
+        starter = filtered[0] if filtered else ""
+
+    if starter:
+        reasons.append(f"建议起手技能为 `{starter}`。")
+    else:
+        reasons.append("当前没有可用的起手技能。")
+
+    return RouteDecision(
+        qtype=qtype,
+        allowed=filtered,
+        preferred=preferred_filtered,
+        discouraged=discouraged_filtered,
+        starter=starter,
+        reasons=reasons,
+        signals=signals,
+    )
+
+
 def route_entry(
     qtype: QuestionType,
     available_skills: list[str],
+    *,
+    question: str = "",
 ) -> EntryRoute:
-    """
-    入口预路由：按问题类型选白名单，再跟已注册的 skill 取交集。
-
-    参数：
-        qtype:              classify_question 的结果
-        available_skills:   SkillRegistry.names() —— 防止路由到未注册的 skill
-
-    返回：EntryRoute（白名单 + 起手）
-    """
-    wanted = ROUTE_MAP.get(qtype, ROUTE_MAP[QuestionType.RESEARCH])
-    available_set = set(available_skills)
-    # 保持白名单顺序，过滤掉未注册的
-    filtered = [s for s in wanted if s in available_set]
-    if not filtered:
-        # 极端情况：该类型所有推荐都没注册 → 退回已注册全集
-        filtered = [s for s in available_skills if s not in _ALWAYS_ALLOWED]
-
-    starter = STARTER_MAP.get(qtype, "search")
-    if starter not in available_set:
-        starter = filtered[0] if filtered else "search"
-
-    return EntryRoute(qtype=qtype, allowed_skills=filtered, starter=starter)
+    decision = build_route_decision(qtype, available_skills, question=question)
+    return EntryRoute(qtype=decision.qtype, allowed_skills=decision.allowed, starter=decision.starter)
 
 
-# ══════════════════════════════════════════════
-# 3. 步间状态路由：根据历史推荐下一步
-# ══════════════════════════════════════════════
+def preview_route(
+    question: str,
+    available_skills: list[str],
+    *,
+    engine: str = "",
+    profile_name: str = "",
+) -> RouteDecision:
+    qtype = classify_question(question, engine)
+    return build_route_decision(
+        qtype,
+        available_skills,
+        question=question,
+        profile_name=profile_name,
+    )
+
 
 def suggest_next_step(
     history: list[dict],
@@ -137,18 +315,10 @@ def suggest_next_step(
     registry: "CitationRegistry | None" = None,
 ) -> str:
     """
-    根据对话历史输出一段"下一步建议"文字（空串表示无特别建议）。
-
-    判定规则（按优先级自上而下，只返回第一个命中的）：
-      - 接近 max_steps（≥ 80%）：强烈建议 finish
-      - 已登记来源 ≥ 5 且最近一步是 search*：建议开始 scrape / finish
-      - 最近一步 search* 且 sources 为空：换关键词或换 search_multi
-      - 最近一步 scrape* 且内容 ≥ 3000 字：建议 extract / summarize
-      - 最近一步 scrape* 且内容 < 500 字：换 URL 或回到搜索
-      - 连续 3 步工具类型相同：提示切换
+    Return a short nudge for the next step. Empty string means no hint.
     """
     if step_num >= int(max_steps * 0.8):
-        return "⚠️ 已接近最大步数，若信息已够请立刻调用 finish。"
+        return "⚠️ 已接近最大步数，若信息已足请立即调用 finish。"
 
     if not history:
         return ""
@@ -161,40 +331,38 @@ def suggest_next_step(
 
     if registry_size >= 5 and last_tool.startswith("search"):
         return (
-            f"💡 已累计 {registry_size} 条来源，建议开始 scrape 重点页面或直接 finish 编排报告。"
+            f"📕 已累计 {registry_size} 条来源，建议开始 scrape 重点页面或直接 finish 编排报告。"
         )
 
     if last_tool.startswith("search") and not last_sources:
         return (
-            "💡 上一次搜索无结果，建议换一组关键词、或改用 search_multi / search_recent 扩大视角。"
+            "📕 上一次搜索无结果，建议换一组关键词，或改用 search_multi / search_recent 扩大视角。"
         )
 
     if last_tool.startswith("scrape"):
         obs_len = len(last_obs)
         if obs_len >= 3000:
             return (
-                "💡 页面内容较长，建议下一步 extract 定向抽取关键信息，或 summarize 压缩要点。"
+                "📕 页面内容较长，建议下一步 extract 定向抽取关键信息，或 summarize 压缩要点。"
             )
         if 0 < obs_len < 500:
             return (
-                "💡 页面内容偏少，可能不是目标页。建议换一个 URL，或回到 search 补充来源。"
+                "📕 页面内容偏少，可能不是目标页。建议换一个 URL，或回到 search 补充来源。"
             )
 
-    # 连续同类工具三步
     if len(history) >= 3:
         last_three = [h.get("tool", "") for h in history[-3:]]
         prefixes = {_tool_prefix(t) for t in last_three}
         if len(prefixes) == 1 and "finish" not in prefixes:
             prefix = next(iter(prefixes))
             return (
-                f"💡 连续 3 步都在 {prefix}*，建议切换类型（search→scrape→extract→finish）。"
+                f"📕 连续 3 步都在 {prefix}*，建议切换类型（search -> scrape -> extract -> finish）。"
             )
 
     return ""
 
 
 def _tool_prefix(tool: str) -> str:
-    """把 search_news / search_multi 归类为 'search'；scrape_batch → 'scrape'。"""
     if tool.startswith("search"):
         return "search"
     if tool.startswith("scrape"):
@@ -204,17 +372,12 @@ def _tool_prefix(tool: str) -> str:
     return tool
 
 
-# ══════════════════════════════════════════════
-# 4. 重复 / 误选纠偏
-# ══════════════════════════════════════════════
-
 @dataclass(slots=True)
 class LoopGuardResult:
-    """纠偏检查的结果。"""
-    ok: bool                       # True=动作可以执行；False=需要拦截
-    reason: str = ""               # 拦截原因（用于提示 LLM）
-    force_finish: bool = False     # True=必须直接 finish
-    warning: str = ""              # ok=True 但要带的警告文字
+    ok: bool
+    reason: str = ""
+    force_finish: bool = False
+    warning: str = ""
 
 
 def check_loop(
@@ -225,22 +388,16 @@ def check_loop(
     registry_size_now: int,
 ) -> LoopGuardResult:
     """
-    纠偏 1：完全相同的 (tool, key_arg) 调用超过 2 次 → 拦截
-    纠偏 2：连续 3 步没给 registry 新增来源 → 强制 finish
-    纠偏 3：scrape/extract 的 url 未在任何历史来源里出现 → 软警告
-
-    参数：
-        tool / args:               当前 LLM 选择的动作
-        history:                   已完成的步骤列表
-        registry_size_before:      本步执行前的 registry 大小
-        registry_size_now:         最近一次成功步骤结束时的 registry 大小
+    1. Block repeated identical (tool, key_arg) calls after two prior attempts.
+    2. Force finish if the last 3 non-finish steps added no new sources.
+    3. Warn when scraping a URL that never appeared in prior sources.
     """
     sig = _action_signature(tool, args)
 
-    # 纠偏 1：重复调用
     if sig:
         prior_same = sum(
-            1 for h in history
+            1
+            for h in history
             if _action_signature(h.get("tool", ""), h.get("args", {})) == sig
         )
         if prior_same >= 2:
@@ -248,30 +405,28 @@ def check_loop(
                 ok=False,
                 reason=(
                     f"检测到你已经调用过 `{tool}` 同样的参数 {prior_same} 次。"
-                    f"请换工具或换参数，不要再重复。"
+                    "请换工具或换参数，不要再重复。"
                 ),
             )
 
-    # 纠偏 2：连续无新来源
     if _stalled_no_new_sources(history, lookback=3):
         return LoopGuardResult(
             ok=True,
             force_finish=True,
             warning=(
-                "⛔ 最近 3 步都没有新增任何来源，强制进入 finish。"
+                "⚠️ 最近 3 步都没有新增任何来源，强制进入 finish。"
                 "请基于已有观察直接编排最终答案。"
             ),
         )
 
-    # 纠偏 3：scrape/extract URL 未在历史来源中
     if tool in ("scrape", "extract", "scrape_batch", "scrape_deep"):
         url_arg = args.get("url") or args.get("urls") or ""
         if url_arg and not _url_seen_in_history(url_arg, history):
             return LoopGuardResult(
                 ok=True,
                 warning=(
-                    f"⚠️ 你要抓取的 URL 在前面的搜索结果里没有出现过，"
-                    f"确认这是可信来源后再继续。"
+                    "⚠️ 你要抓取的 URL 在前面的搜索结果里没有出现过。"
+                    "确认这是可信来源后再继续。"
                 ),
             )
 
@@ -279,10 +434,8 @@ def check_loop(
 
 
 def _action_signature(tool: str, args: dict) -> str:
-    """把 (tool, 关键参数) 压成一个签名字符串，用于判重。"""
     if not tool or tool == "finish":
         return ""
-    # 选择该 tool 的第一个关键字参数作为指纹（query / url / text 等）
     for key in ("query", "url", "urls", "text", "company", "instruction"):
         if key in args:
             value = str(args[key]).strip().lower()
@@ -292,11 +445,9 @@ def _action_signature(tool: str, args: dict) -> str:
 
 
 def _stalled_no_new_sources(history: list[dict], lookback: int = 3) -> bool:
-    """最近 lookback 步里全部 cite_ids 为空 → 没有新来源进入 registry。"""
     if len(history) < lookback:
         return False
     recent = history[-lookback:]
-    # 只看非 finish 的步骤
     non_finish = [h for h in recent if h.get("tool") != "finish"]
     if len(non_finish) < lookback:
         return False
@@ -304,7 +455,6 @@ def _stalled_no_new_sources(history: list[dict], lookback: int = 3) -> bool:
 
 
 def _url_seen_in_history(url: str, history: list[dict]) -> bool:
-    """判断某个 URL 是否在历史的 sources 里登记过。"""
     target = url.strip().lower().rstrip("/")
     if not target:
         return False

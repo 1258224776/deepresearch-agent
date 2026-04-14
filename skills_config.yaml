@@ -1,0 +1,88 @@
+skills:
+  search:
+    enabled: true
+  search_multi:
+    enabled: true
+  search_docs:
+    enabled: true
+  search_company:
+    enabled: true
+  search_site:
+    enabled: true
+  scrape:
+    enabled: true
+  extract_links:
+    enabled: true
+  extract:
+    enabled: true
+  summarize:
+    enabled: true
+  rag_retrieve:
+    enabled: true
+  search_recent:
+    enabled: true
+  search_news:
+    enabled: true
+  scrape_batch:
+    enabled: true
+  scrape_deep:
+    enabled: true
+profiles:
+  react_default:
+    description: 平衡型交互研究配置，保留常用搜索、单页抓取与抽取能力。
+    allow:
+      - search
+      - search_multi
+      - search_docs
+      - search_company
+      - search_recent
+      - search_news
+      - search_site
+      - scrape
+      - extract_links
+      - extract
+      - summarize
+      - rag_retrieve
+  planner:
+    description: 规划执行配置，限制深度与批量爬取，控制子问题收敛速度。
+    allow:
+      - search
+      - search_multi
+      - search_docs
+      - search_company
+      - search_recent
+      - search_news
+      - scrape
+      - extract
+      - summarize
+      - rag_retrieve
+  api_safe:
+    description: API 默认安全配置，避免深度或递归型网页抓取。
+    allow:
+      - search
+      - search_multi
+      - search_docs
+      - search_company
+      - search_recent
+      - search_news
+      - scrape
+      - extract
+      - summarize
+      - rag_retrieve
+  web_research_heavy:
+    description: 网页研究增强配置，开放批量和深度抓取能力。
+    allow:
+      - search
+      - search_multi
+      - search_docs
+      - search_company
+      - search_site
+      - scrape
+      - extract_links
+      - extract
+      - summarize
+      - rag_retrieve
+      - search_recent
+      - search_news
+      - scrape_batch
+      - scrape_deep

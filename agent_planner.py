@@ -134,6 +134,7 @@ def _execute_sub(
         progress_callback=progress_cb,
         registry=registry,
         compose=False,  # 子问题不单独编排，最后统一由 Reporter 汇总
+        skill_profile="planner",
     )
     # 从返回值重建 Observation 列表
     obs_list = [Observation(**o) for o in result.get("observations", [])]
