@@ -161,32 +161,39 @@ header[data-testid="stHeader"] {
     box-shadow: none !important;
     height: 3.25rem !important;
     z-index: 999 !important;
+    visibility: visible !important;
+    opacity: 1 !important;
 }
 /* 只隐藏右上 Deploy/菜单，保留左上 sidebar 折叠/展开按钮 */
 div[data-testid="stToolbar"],
 #MainMenu {
     display: none !important;
 }
-/* 侧边栏折叠后的「展开」按钮：醒目暖色圆形，固定左上 */
-div[data-testid="collapsedControl"] {
+/* 侧边栏折叠后的「展开」按钮（Streamlit 新旧版本都覆盖） */
+div[data-testid="collapsedControl"],
+div[data-testid="stSidebarCollapsedControl"],
+button[kind="header"],
+button[kind="headerNoPadding"] {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
-    position: fixed !important;
-    top: 12px !important;
-    left: 12px !important;
     z-index: 1000 !important;
     background: var(--accent) !important;
+    color: #ffffff !important;
     border-radius: 10px !important;
     padding: 6px 8px !important;
     box-shadow: 0 4px 14px rgba(194, 87, 26, 0.30) !important;
 }
 div[data-testid="collapsedControl"] svg,
-div[data-testid="collapsedControl"] * {
+div[data-testid="stSidebarCollapsedControl"] svg,
+button[kind="header"] svg,
+button[kind="headerNoPadding"] svg,
+div[data-testid="collapsedControl"] *,
+div[data-testid="stSidebarCollapsedControl"] * {
     color: #ffffff !important;
     fill: #ffffff !important;
 }
-/* 侧边栏顶部那个「←」收起按钮也给它点对比 */
+/* 侧边栏顶部那个「←」收起按钮（展开时显示） */
 button[data-testid="baseButton-header"],
 button[data-testid="baseButton-headerNoPadding"] {
     color: var(--accent) !important;
@@ -198,10 +205,24 @@ button[data-testid="baseButton-headerNoPadding"] svg {
     fill: var(--accent) !important;
     color: var(--accent) !important;
 }
-/* 强制显示侧边栏本体（防御性） */
-section[data-testid="stSidebar"][aria-expanded="true"] {
-    display: flex !important;
-    min-width: 260px !important;
+/* 确保侧边栏本身不会被任何规则意外隐藏 */
+section[data-testid="stSidebar"] {
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* ── 聊天流 + 底部贴底输入框 ── */
+.workspace-chat-stream {
+    padding-bottom: 12px;
+}
+.workspace-composer-sticky { height: 0; }
+div[data-testid="stForm"]:has(> div .workspace-composer-anchor),
+div[data-testid="stForm"]:has(.workspace-composer-meta) {
+    position: sticky;
+    bottom: 12px;
+    background: var(--surface) !important;
+    box-shadow: var(--shadow-lg) !important;
+    z-index: 50;
 }
 
 /* 代码块与行内代码 */
@@ -2639,51 +2660,7 @@ if st.session_state.mode == "workspace":
     submit_clicked = False
     composer_value = ""
 
-    st.markdown("<div class='workspace-composer-anchor'></div>", unsafe_allow_html=True)
-    with st.form("workspace_composer", clear_on_submit=False):
-        st.markdown(
-            f"<div class='workspace-composer-meta'>{_wt('current_thread', mode=panel_labels.get(workspace_panel, _wt('mode_chat')), title=active_title)}</div>",
-            unsafe_allow_html=True,
-        )
-
-        if workspace_panel == "extract":
-            st.text_area(
-                _wt("extract_goal"),
-                key="workspace_extract_intent",
-                height=120,
-                placeholder=_wt("extract_placeholder"),
-            )
-            st.text_area(
-                _wt("page_urls"),
-                key="workspace_extract_urls",
-                height=100,
-                placeholder=_wt("page_urls_placeholder"),
-            )
-            extract_action_cols = st.columns([0.58, 1.12, 0.58], gap="small")
-            with extract_action_cols[0]:
-                _render_workspace_upload_control()
-            with extract_action_cols[1]:
-                _render_workspace_model_controls()
-            with extract_action_cols[2]:
-                submit_clicked = st.form_submit_button("↑", use_container_width=True, type="primary")
-        else:
-            prompt_placeholder = _wt("chat_placeholder") if workspace_panel == "chat" else _wt("research_placeholder")
-            st.text_area(
-                _wt("prompt"),
-                key="workspace_prompt",
-                height=128,
-                placeholder=prompt_placeholder,
-                label_visibility="collapsed",
-            )
-            composer_value = st.session_state.get("workspace_prompt", "").strip()
-            composer_actions = st.columns([0.58, 1.12, 0.58], gap="small")
-            with composer_actions[0]:
-                _render_workspace_upload_control()
-            with composer_actions[1]:
-                _render_workspace_model_controls()
-            with composer_actions[2]:
-                submit_clicked = st.form_submit_button("↑", use_container_width=True, type="primary")
-
+    # ── 1. 顶部工具条：模式切换 + 高级选项（窄） ──
     control_cols = st.columns([3.6, 1.35], gap="small")
     with control_cols[0]:
         mode_cols = st.columns(3, gap="small")
@@ -2701,6 +2678,8 @@ if st.session_state.mode == "workspace":
         with st.expander(_wt("advanced_short"), expanded=False):
             _render_workspace_advanced_controls(st.session_state.get("workspace_panel", "chat"))
 
+    # ── 2. 消息区 / 起步卡片（位于输入框之上，聊天风格） ──
+    st.markdown("<div class='workspace-chat-stream'>", unsafe_allow_html=True)
     if not st.session_state.workspace_messages:
         st.markdown(
             f"""
@@ -2733,9 +2712,7 @@ if st.session_state.mode == "workspace":
                         _apply_workspace_starter(card)
                         st.rerun()
                     st.caption(card["desc"])
-
-    if st.session_state.workspace_messages:
-        workspace_panel = st.session_state.get("workspace_panel", "chat")
+    else:
         panel_hint = {
             "chat": _wt("ask_with_skills"),
             "research": _wt("research_hint"),
@@ -2745,6 +2722,53 @@ if st.session_state.mode == "workspace":
             st.caption(panel_hint)
         for idx, msg in enumerate(st.session_state.workspace_messages):
             _render_workspace_message(msg, idx)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── 3. 底部输入框（微信/GPT 风格贴底） ──
+    st.markdown("<div class='workspace-composer-anchor workspace-composer-sticky'></div>", unsafe_allow_html=True)
+    with st.form("workspace_composer", clear_on_submit=False):
+        st.markdown(
+            f"<div class='workspace-composer-meta'>{_wt('current_thread', mode=panel_labels.get(workspace_panel, _wt('mode_chat')), title=active_title)}</div>",
+            unsafe_allow_html=True,
+        )
+
+        if workspace_panel == "extract":
+            st.text_area(
+                _wt("extract_goal"),
+                key="workspace_extract_intent",
+                height=120,
+                placeholder=_wt("extract_placeholder"),
+            )
+            st.text_area(
+                _wt("page_urls"),
+                key="workspace_extract_urls",
+                height=100,
+                placeholder=_wt("page_urls_placeholder"),
+            )
+            extract_action_cols = st.columns([0.58, 1.12, 0.58], gap="small")
+            with extract_action_cols[0]:
+                _render_workspace_upload_control()
+            with extract_action_cols[1]:
+                _render_workspace_model_controls()
+            with extract_action_cols[2]:
+                submit_clicked = st.form_submit_button("↑", use_container_width=True, type="primary")
+        else:
+            prompt_placeholder = _wt("chat_placeholder") if workspace_panel == "chat" else _wt("research_placeholder")
+            st.text_area(
+                _wt("prompt"),
+                key="workspace_prompt",
+                height=108,
+                placeholder=prompt_placeholder,
+                label_visibility="collapsed",
+            )
+            composer_value = st.session_state.get("workspace_prompt", "").strip()
+            composer_actions = st.columns([0.58, 1.12, 0.58], gap="small")
+            with composer_actions[0]:
+                _render_workspace_upload_control()
+            with composer_actions[1]:
+                _render_workspace_model_controls()
+            with composer_actions[2]:
+                submit_clicked = st.form_submit_button("↑", use_container_width=True, type="primary")
 
     if submit_clicked:
         panel = st.session_state.get("workspace_panel", "chat")
