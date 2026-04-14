@@ -118,6 +118,50 @@ st.markdown("""
     color: var(--text-primary);
 }
 
+/* ── 全局文字兜底：Streamlit 内部组件一律用深棕 ── */
+.stApp, .stApp p, .stApp span, .stApp div, .stApp li, .stApp label,
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+.stApp strong, .stApp em, .stApp small, .stApp code {
+    color: var(--text-primary);
+}
+.stApp a { color: var(--accent); }
+.stApp a:hover { color: var(--accent-hover); }
+
+/* Streamlit markdown/caption/label */
+div[data-testid="stMarkdownContainer"] p,
+div[data-testid="stMarkdownContainer"] li,
+div[data-testid="stMarkdownContainer"] span,
+div[data-testid="stMarkdownContainer"] strong,
+div[data-testid="stMarkdownContainer"] em { color: var(--text-primary) !important; }
+
+div[data-testid="stCaptionContainer"],
+div[data-testid="stCaptionContainer"] * { color: var(--text-muted) !important; }
+
+label[data-testid="stWidgetLabel"],
+label[data-testid="stWidgetLabel"] * { color: var(--text-primary) !important; }
+
+/* metric / header 组件 */
+div[data-testid="stMetricLabel"] * { color: var(--text-muted) !important; }
+div[data-testid="stMetricValue"] * { color: var(--text-primary) !important; }
+div[data-testid="stMetricDelta"] * { color: var(--text-secondary) !important; }
+div[data-testid="stHeader"] { background: transparent !important; }
+
+/* 代码块与行内代码 */
+.stApp code, .stApp pre {
+    background: var(--surface-2) !important;
+    color: var(--accent-hover) !important;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1px 6px;
+}
+.stApp pre { padding: 12px 14px; }
+.stApp pre code { background: transparent !important; border: none; padding: 0; color: var(--text-primary) !important; }
+
+/* 表格 */
+.stApp table { color: var(--text-primary); }
+.stApp th { color: var(--text-primary); background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.stApp td { border-bottom: 1px solid var(--border); }
+
 /* ── 隐藏 Streamlit 默认元素 ── */
 footer { visibility: hidden; }
 .block-container { padding-top: 2rem !important; padding-bottom: 4rem !important; max-width: 1200px !important; }
