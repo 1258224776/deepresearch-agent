@@ -7,7 +7,7 @@ import os
 import streamlit as st
 
 from agent import (
-    ai_generate, reason, summarize_source, compile_digest,
+    ai_generate, ai_generate_role, reason, summarize_source, compile_digest,
     cross_validate, generate_scrape_digest,
     chat_with_report, run_research, run_url_pipeline,
 )
@@ -27,7 +27,7 @@ from skills.profiles import DEFAULT_SKILL_PROFILE, get_profile_metadata_list
 from tools import (
     web_search, fetch_page_content, save_report, parse_uploaded_file,
 )
-from prompts import TEMPLATES
+from prompts import SYSTEM_PROMPT, TEMPLATES
 
 # ──────────────────────────────────────────────
 # 页面配置
@@ -895,7 +895,7 @@ div[data-testid="stRadio"] label { color: var(--text-primary) !important; }
 # Session State
 # ──────────────────────────────────────────────
 _defaults = {
-    "mode":          "home",
+    "mode":          "workspace",
     "phase":         "input",
     "question":      "",
     "sources":       [],
@@ -920,6 +920,15 @@ _defaults = {
     "scrape_time_range":  "不限",
     "scrape_report":      "",    # 按需生成的综合报告（不再自动触发）
     "route_mode":         "manual",
+    "workspace_panel":    "💬 对话",
+    "workspace_messages": [],
+    "workspace_chat_history": [],
+    "workspace_context_report": "",
+    "workspace_context_title": "",
+    "workspace_research_mode": "材料探索",
+    "workspace_extract_urls": "",
+    "workspace_extract_intent": "",
+    "workspace_agent_steps": 8,
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -934,6 +943,244 @@ RELEVANCE_DOT   = {"high": "🟢", "medium": "🟡", "low": "⚪"}
 def go_home():
     for k, v in _defaults.items():
         st.session_state[k] = v
+
+
+WORKSPACE_CHAT_SYSTEM_PROMPT = (
+    "你是 DeepResearch 工作台助手。你需要在持续会话里帮助用户完成普通问答、"
+    "内容探索、网页提取和后续追问。回答要简洁、直接，并优先利用当前工作台上下文。"
+)
+
+WORKSPACE_SOURCE_HINTS = {
+    "全网综合": "",
+    "新闻资讯（时效优先）": " 请优先关注最近的新闻、公告、动态与媒体报道。",
+    "技术文档（深度优先）": " 请优先查找官方文档、API reference、guide、SDK 文档。",
+    "学术/论文": " 请优先关注论文、研究综述、学术机构资料。",
+}
+
+WORKSPACE_TIME_MAP = {
+    "不限": "",
+    "最近24小时": "d",
+    "最近一周": "w",
+    "最近一月": "m",
+    "最近一年": "y",
+}
+
+
+def _workspace_append_message(
+    role: str,
+    kind: str,
+    content: str,
+    data: dict | None = None,
+) -> None:
+    st.session_state.workspace_messages.append(
+        {
+            "role": role,
+            "kind": kind,
+            "content": content,
+            "data": data or {},
+        }
+    )
+
+
+def _workspace_set_context(title: str, report: str) -> None:
+    st.session_state.workspace_context_title = title or ""
+    st.session_state.workspace_context_report = report or ""
+
+
+def _workspace_note_chat(role: str, content: str) -> None:
+    text = str(content or "").strip()
+    if not text:
+        return
+    st.session_state.workspace_chat_history.append({"role": role, "content": text})
+    st.session_state.workspace_chat_history = st.session_state.workspace_chat_history[-12:]
+
+
+def _workspace_chat_context(limit: int = 8) -> str:
+    history = st.session_state.get("workspace_chat_history", [])[-limit:]
+    lines: list[str] = []
+    for item in history:
+        role = "用户" if item.get("role") == "user" else "助手"
+        content = str(item.get("content", "")).strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines)
+
+
+def _workspace_answer_chat(user_msg: str) -> str:
+    engine = st.session_state.get("ue_engine", "")
+    context_report = st.session_state.get("workspace_context_report", "")
+    context_title = st.session_state.get("workspace_context_title", "当前工作台上下文")
+    chat_history = st.session_state.get("workspace_chat_history", [])
+    if context_report:
+        return chat_with_report(context_title, context_report, chat_history, user_msg)
+
+    history_ctx = _workspace_chat_context()
+    prompt = f"""你正在 DeepResearch 的工作台中与用户持续对话。
+
+最近对话：
+{history_ctx or "（暂无）"}
+
+用户最新消息：
+{user_msg}
+
+请基于当前上下文直接回答。如果问题需要进一步研究，也先明确告诉用户下一步建议。"""
+    return ai_generate_role(
+        prompt,
+        system=WORKSPACE_CHAT_SYSTEM_PROMPT or SYSTEM_PROMPT,
+        role="analyst",
+        engine=engine,
+    )
+
+
+def _render_workspace_sources(sources: list[dict]) -> None:
+    if not sources:
+        return
+
+    for idx, src in enumerate(sources, 1):
+        title = src.get("title") or src.get("url") or f"来源 {idx}"
+        url = src.get("url", "")
+        snippet = (src.get("snippet") or "").strip()
+        relevance = src.get("relevance", "")
+        badge = RELEVANCE_LABEL.get(relevance, "")
+
+        if url:
+            st.markdown(f"{idx}. [{title}]({url})")
+        else:
+            st.markdown(f"{idx}. {title}")
+
+        meta = []
+        if badge:
+            meta.append(badge)
+        if snippet:
+            meta.append(snippet[:180])
+        if meta:
+            st.caption(" · ".join(meta))
+
+
+def _render_workspace_extract_items(items: list[dict]) -> None:
+    if not items:
+        st.caption("没有提取到结构化条目。")
+        return
+
+    import pandas as pd
+
+    display_keys = [k for k in items[0].keys() if not str(k).startswith("_")]
+
+    def _norm(value):
+        if isinstance(value, list):
+            return "、".join(str(x) for x in value if x)
+        return value or ""
+
+    df = pd.DataFrame([{k: _norm(item.get(k)) for k in display_keys} for item in items])
+    column_config = {}
+    if "url" in display_keys:
+        column_config["url"] = st.column_config.LinkColumn("链接", display_text="打开")
+    st.dataframe(df, use_container_width=True, height=320, column_config=column_config)
+
+
+def _render_workspace_message(msg: dict, index: int) -> None:
+    role = msg.get("role", "assistant")
+    kind = msg.get("kind", "chat")
+    content = msg.get("content", "")
+    data = msg.get("data", {}) or {}
+    avatar = "🧑" if role == "user" else "🤖"
+
+    with st.chat_message(role, avatar=avatar):
+        if role == "user":
+            label_map = {
+                "chat": "普通对话",
+                "research": "内容探索",
+                "extract": "网页提取",
+                "agent": "Agent 探索",
+            }
+            st.caption(label_map.get(kind, "工作台消息"))
+            st.markdown(content)
+            return
+
+        if kind == "chat":
+            st.markdown(content)
+            return
+
+        if kind == "research":
+            st.caption(f"内容探索结果 · {data.get('mode', '材料探索')}")
+            if content:
+                st.markdown(content)
+            if data.get("reasoning_log"):
+                with st.expander("过程记录", expanded=False):
+                    for line in data.get("reasoning_log", []):
+                        st.markdown(f"- {line}")
+            if data.get("sources"):
+                with st.expander(f"材料清单（{len(data.get('sources', []))}）", expanded=False):
+                    _render_workspace_sources(data.get("sources", []))
+            if data.get("task_mode") == "aggregation" and data.get("digest"):
+                with st.expander("结构化看板", expanded=True):
+                    render_agg_dashboard(data.get("digest", ""))
+            return
+
+        if kind == "extract":
+            st.caption(
+                f"网页提取结果 · {data.get('url_count', 0)} 个 URL · "
+                f"{len(data.get('items', []) or [])} 条记录"
+            )
+            if content:
+                st.markdown(content)
+            dashboard = data.get("dashboard", "")
+            if dashboard:
+                render_agg_dashboard(dashboard)
+            with st.expander("结构化数据", expanded=False):
+                _render_workspace_extract_items(data.get("items", []))
+            if data.get("log"):
+                with st.expander("流水线记录", expanded=False):
+                    for line in data.get("log", []):
+                        st.markdown(f"- {line}")
+            return
+
+        if kind == "agent":
+            result = data.get("result", {}) or {}
+            is_planner = bool(data.get("is_planner"))
+            st.caption("深度规划" if is_planner else "ReAct 自主")
+            if content:
+                st.markdown(content)
+            if is_planner:
+                plan = result.get("plan", {}) or {}
+                if plan:
+                    with st.expander("研究规划", expanded=False):
+                        reasoning = plan.get("reasoning", "")
+                        if reasoning:
+                            st.caption(reasoning)
+                        for idx, sq in enumerate(plan.get("sub_questions", []), 1):
+                            st.markdown(f"{idx}. {sq}")
+                sub_results = result.get("sub_results", []) or []
+                if sub_results:
+                    with st.expander(f"子问题结果（{len(sub_results)}）", expanded=False):
+                        for idx, sub in enumerate(sub_results, 1):
+                            st.markdown(f"**{idx}. {sub.get('sub_q', '')}**")
+                            st.markdown(sub.get("answer", ""))
+            else:
+                _render_route_debug(result.get("route", {}), data.get("skill_profile", DEFAULT_SKILL_PROFILE))
+                steps = result.get("steps", []) or []
+                if steps:
+                    with st.expander(f"推理步骤（{len(steps)}）", expanded=False):
+                        for idx, step in enumerate(steps, 1):
+                            label = _format_step_label(
+                                step.get("tool", ""),
+                                step.get("args", {}) or {},
+                                idx,
+                                "🪄",
+                            )
+                            with st.expander(label, expanded=False):
+                                st.markdown(f"**Thought**\n\n{step.get('thought', '')}")
+                                obs = step.get("observation", "")
+                                if obs and obs != "(任务完成)":
+                                    st.text(obs[:1500] + ("..." if len(obs) > 1500 else ""))
+                                _render_observation_sources(
+                                    step.get("sources", []),
+                                    step.get("cite_ids", []),
+                                )
+            _render_reference_registry(result)
+            return
+
+        st.markdown(content or "（无内容）")
 
 
 def render_agg_dashboard(digest: str) -> None:
@@ -1487,7 +1734,310 @@ with st.sidebar:
 # ══════════════════════════════════════════════
 # 首页
 # ══════════════════════════════════════════════
-if st.session_state.mode == "home":
+if st.session_state.mode == "workspace":
+    st.markdown("""
+<div class="topbar-wrap">
+  <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
+  <div class="topbar-crumb-new">
+    工作台 <span class="sep">›</span> <span class="cur">持续会话</span>
+  </div>
+  <div></div>
+</div>
+<div class="page-hero" style="margin-bottom:20px;">
+  <div class="page-hero-title">🧭 <span class="accent">研究工作台</span></div>
+  <div class="page-hero-sub">把普通对话、内容探索和网页提取收进同一条会话里。你可以持续推进任务，而不是来回切页面。</div>
+</div>
+""", unsafe_allow_html=True)
+
+    left_col, right_col = st.columns([1.8, 1.0], gap="large")
+    composer_value = None
+    extract_clicked = False
+
+    with right_col:
+        st.markdown("#### 工作方式")
+        workspace_panel = st.radio(
+            "选择面板",
+            ["💬 对话", "📚 内容探索", "🧩 网页提取"],
+            key="workspace_panel",
+            label_visibility="collapsed",
+        )
+
+        route_title, route_desc = _current_model_route_summary()
+        st.caption(f"模型路由：{route_title}")
+        if route_desc:
+            st.caption(route_desc)
+
+        if workspace_panel == "📚 内容探索":
+            research_mode = st.radio(
+                "探索方式",
+                ["材料探索", "ReAct 自主", "深度规划"],
+                key="workspace_research_mode",
+                horizontal=True,
+            )
+
+            if research_mode == "材料探索":
+                st.selectbox(
+                    "来源类型",
+                    ["全网综合", "新闻资讯（时效优先）", "技术文档（深度优先）", "学术/论文"],
+                    key="scrape_source_type",
+                )
+                st.selectbox(
+                    "时间范围",
+                    ["不限", "最近24小时", "最近一周", "最近一月", "最近一年"],
+                    key="scrape_time_range",
+                )
+            elif research_mode == "ReAct 自主":
+                st.selectbox(
+                    "Skill Profile",
+                    options=[DEFAULT_SKILL_PROFILE, "web_research_heavy"],
+                    index=0,
+                    key="workspace_agent_profile",
+                    format_func=lambda p: {
+                        "react_default": "react_default · 平衡模式",
+                        "web_research_heavy": "web_research_heavy · 网页研究增强",
+                    }.get(p, p),
+                )
+                st.number_input(
+                    "最大步骤",
+                    min_value=3,
+                    max_value=15,
+                    value=int(st.session_state.get("workspace_agent_steps", 8)),
+                    step=1,
+                    key="workspace_agent_steps",
+                )
+            else:
+                st.caption("深度规划会先拆分子问题再综合，适合复杂研究。")
+
+        elif workspace_panel == "🧩 网页提取":
+            st.text_area(
+                "目标网址",
+                key="workspace_extract_urls",
+                height=180,
+                placeholder="https://example.com/page1\nhttps://example.com/page2",
+            )
+            st.text_area(
+                "提取意图",
+                key="workspace_extract_intent",
+                height=110,
+                placeholder="例如：提取课程名称、价格、讲师、适合人群",
+            )
+            extract_clicked = st.button(
+                "开始网页提取",
+                use_container_width=True,
+                type="primary",
+            )
+        else:
+            st.caption("普通对话适合直接提问、追问，或基于当前研究上下文继续推进。")
+
+        st.divider()
+        act1, act2 = st.columns(2)
+        with act1:
+            if st.button("清空会话", use_container_width=True):
+                for key in (
+                    "workspace_messages",
+                    "workspace_chat_history",
+                    "workspace_context_report",
+                    "workspace_context_title",
+                ):
+                    st.session_state[key] = _defaults[key]
+                st.rerun()
+        with act2:
+            if st.button("经典首页", use_container_width=True):
+                st.session_state.mode = "home"
+                st.rerun()
+
+        if st.session_state.get("workspace_context_report"):
+            st.divider()
+            st.markdown("**当前上下文**")
+            st.caption(st.session_state.get("workspace_context_title", ""))
+            if st.button("保存当前报告", use_container_width=True):
+                fp = save_report(
+                    st.session_state.get("workspace_context_title", "工作台记录"),
+                    st.session_state.get("workspace_context_report", ""),
+                )
+                st.success(f"已保存：{fp}")
+
+    with left_col:
+        st.markdown("#### 会话")
+        if not st.session_state.workspace_messages:
+            st.markdown("""
+<div class="mode-grid">
+  <div class="mode-card">
+    <div class="mode-card-glow"></div>
+    <div class="mode-icon-wrap">💬</div>
+    <div class="mode-title">普通对话</div>
+    <div class="mode-desc">直接问模型。适合快速判断、澄清需求、对研究结果继续追问。</div>
+  </div>
+  <div class="mode-card">
+    <div class="mode-card-glow"></div>
+    <div class="mode-icon-wrap">📚</div>
+    <div class="mode-title">内容探索</div>
+    <div class="mode-desc">输入主题后，可以选择材料探索、ReAct 自主或深度规划三种研究深度。</div>
+  </div>
+  <div class="mode-card">
+    <div class="mode-card-glow"></div>
+    <div class="mode-icon-wrap">🧩</div>
+    <div class="mode-title">网页提取</div>
+    <div class="mode-desc">贴入一组 URL 和提取意图，工作台会生成结构化数据和可视看板。</div>
+  </div>
+  <div class="mode-card">
+    <div class="mode-card-glow"></div>
+    <div class="mode-icon-wrap">🔁</div>
+    <div class="mode-title">持续上下文</div>
+    <div class="mode-desc">最新研究结果会自动成为当前上下文，后续可以回到对话继续追问。</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+        else:
+            for idx, msg in enumerate(st.session_state.workspace_messages):
+                _render_workspace_message(msg, idx)
+
+        if workspace_panel != "🧩 网页提取":
+            placeholder = {
+                "💬 对话": "直接输入你的问题，或继续追问当前上下文...",
+                "📚 内容探索": "输入你要研究的主题，例如：比较 OpenAI 和 Anthropic 的 API 策略",
+            }.get(workspace_panel, "输入内容...")
+            composer_value = st.chat_input(placeholder)
+
+    if extract_clicked:
+        urls = [
+            u.strip()
+            for u in st.session_state.get("workspace_extract_urls", "").splitlines()
+            if u.strip().startswith("http")
+        ]
+        intent = st.session_state.get("workspace_extract_intent", "").strip()
+        if not urls or not intent:
+            st.warning("网页提取需要同时提供 URL 列表和提取意图。")
+        else:
+            user_text = f"请从 {len(urls)} 个网页中提取：{intent}"
+            _workspace_append_message("user", "extract", user_text, {"urls": urls})
+            _workspace_note_chat("user", user_text)
+            with st.spinner("正在执行网页提取..."):
+                schema, items, dashboard_json, log = run_url_pipeline(
+                    urls,
+                    intent,
+                    engine=st.session_state.get("ue_engine", ""),
+                )
+            summary = (
+                f"已完成网页提取，共处理 {len(urls)} 个 URL，"
+                f"提取出 {len(items)} 条结构化记录。"
+            )
+            _workspace_append_message(
+                "assistant",
+                "extract",
+                summary,
+                {
+                    "schema": schema,
+                    "items": items,
+                    "dashboard": dashboard_json,
+                    "log": log,
+                    "url_count": len(urls),
+                    "intent": intent,
+                },
+            )
+            _workspace_note_chat("assistant", summary)
+            _workspace_set_context(f"网页提取：{intent}", dashboard_json or summary)
+            st.rerun()
+
+    if composer_value:
+        panel = st.session_state.get("workspace_panel", "💬 对话")
+        engine = st.session_state.get("ue_engine", "")
+
+        if panel == "💬 对话":
+            _workspace_append_message("user", "chat", composer_value)
+            _workspace_note_chat("user", composer_value)
+            with st.spinner("正在回答..."):
+                answer = _workspace_answer_chat(composer_value)
+            _workspace_append_message("assistant", "chat", answer)
+            _workspace_note_chat("assistant", answer)
+            st.rerun()
+
+        if panel == "📚 内容探索":
+            research_mode = st.session_state.get("workspace_research_mode", "材料探索")
+            if research_mode == "材料探索":
+                source_type = st.session_state.get("scrape_source_type", "全网综合")
+                time_range = st.session_state.get("scrape_time_range", "不限")
+                hint = WORKSPACE_SOURCE_HINTS.get(source_type, "")
+                timelimit = WORKSPACE_TIME_MAP.get(time_range, "")
+                task_question = composer_value.strip() + hint
+                _workspace_append_message("user", "research", composer_value, {"mode": research_mode})
+                _workspace_note_chat("user", composer_value)
+                with st.spinner("正在搜索和整理材料..."):
+                    sources, digest, reasoning_log, task_mode = run_research(
+                        task_question,
+                        timelimit=timelimit,
+                    )
+                summary = digest or compile_digest(sources, composer_value.strip())
+                summary = summary or f"已完成内容探索，共收集 {len(sources)} 条来源。"
+                _workspace_append_message(
+                    "assistant",
+                    "research",
+                    summary,
+                    {
+                        "mode": research_mode,
+                        "question": composer_value.strip(),
+                        "sources": sources,
+                        "digest": summary,
+                        "reasoning_log": reasoning_log,
+                        "task_mode": task_mode,
+                    },
+                )
+                _workspace_note_chat("assistant", summary)
+                _workspace_set_context(f"内容探索：{composer_value.strip()}", summary)
+                st.rerun()
+
+            _workspace_append_message("user", "agent", composer_value, {"mode": research_mode})
+            _workspace_note_chat("user", composer_value)
+            if research_mode == "深度规划":
+                from agent_planner import run_planner_agent
+
+                with st.spinner("正在执行深度规划..."):
+                    result = run_planner_agent(
+                        question=composer_value.strip(),
+                        engine=engine,
+                    )
+                answer = result.get("answer", "") or "已完成深度规划，但未返回总结。"
+                _workspace_append_message(
+                    "assistant",
+                    "agent",
+                    answer,
+                    {
+                        "result": result,
+                        "is_planner": True,
+                        "skill_profile": "planner",
+                    },
+                )
+                _workspace_note_chat("assistant", answer)
+                _workspace_set_context(f"深度规划：{composer_value.strip()}", answer)
+                st.rerun()
+
+            from agent_loop import run_agent
+
+            selected_profile = st.session_state.get("workspace_agent_profile", DEFAULT_SKILL_PROFILE)
+            max_steps = int(st.session_state.get("workspace_agent_steps", 8))
+            with st.spinner("正在执行 ReAct 自主探索..."):
+                result = run_agent(
+                    question=composer_value.strip(),
+                    engine=engine,
+                    max_steps=max_steps,
+                    skill_profile=selected_profile,
+                )
+            answer = result.get("answer", "") or "已完成自主探索，但未返回总结。"
+            _workspace_append_message(
+                "assistant",
+                "agent",
+                answer,
+                {
+                    "result": result,
+                    "is_planner": False,
+                    "skill_profile": selected_profile,
+                },
+            )
+            _workspace_note_chat("assistant", answer)
+            _workspace_set_context(f"自主探索：{composer_value.strip()}", answer)
+            st.rerun()
+
+elif st.session_state.mode == "home":
 
     st.markdown("""
 <div class="hero-wrap">
