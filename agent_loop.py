@@ -1,14 +1,8 @@
 """
-agent_loop.py — ReAct Agent 核心（v2）
+Core ReAct agent loop.
 
-改进点（对比 _originals/agent_loop.py）：
-  #1  LLM 输出用 Pydantic 校验，格式不合法自动重试（最多 MAX_PARSE_RETRIES 次）
-  #3  上下文压缩：历史超过 COMPRESS_AFTER 轮时压缩旧观察，节省 token
-  #4  工具集扩充：新增 extract（网页定向提取）/ summarize（文本摘要）/ search_site（定点搜索）
-  #6  错误分类：区分 LLMSchemaError / SearchEmptyError / ScrapeFailedError /
-               RagNotReadyError / RateLimitError，不再统一吞异常
-
-每轮：思考(Thought) → 行动(Action) → 观察(Observation) → 再思考…
+Stage C moves execution tools into project-local skills while keeping
+the orchestration loop, finish signal, and report composition here.
 """
 
 from __future__ import annotations
@@ -16,83 +10,57 @@ from __future__ import annotations
 import traceback
 from typing import Callable
 
-from pydantic import BaseModel, field_validator, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
 from agent import ai_generate_role, ai_tool_call, extract_json
-from tools import web_search, fetch_via_jina
 from prompts import prompt_react_system
-
-# ══════════════════════════════════════════════
-# 常量
-# ══════════════════════════════════════════════
-MAX_PARSE_RETRIES = 2    # #1 LLM 输出格式不合法时最多重试次数
-COMPRESS_AFTER    = 4    # #3 历史超过此步数后，压缩更早的观察
-OBS_FULL_LEN      = 1500 # 近期步骤观察保留字符数
-OBS_COMPRESSED    = 300  # 压缩后旧步骤观察保留字符数
+from report import CitationRegistry, Observation, QuestionType, classify_question, compose_report
+from skills import BUILTIN_SKILL_REGISTRY
+from skills.base import SkillContext
+from skills.router import check_loop, route_entry, suggest_next_step
 
 
-# ══════════════════════════════════════════════
-# #6 错误类型分类
-# ══════════════════════════════════════════════
+MAX_PARSE_RETRIES = 2
+COMPRESS_AFTER = 4
+OBS_FULL_LEN = 1500
+OBS_COMPRESSED = 300
+
+
 class AgentError(Exception):
-    """Agent 基础异常"""
+    """Base agent error."""
+
 
 class LLMSchemaError(AgentError):
-    """LLM 输出不符合预期 JSON schema"""
+    """LLM output did not match the expected action schema."""
+
 
 class SearchEmptyError(AgentError):
-    """搜索无结果"""
+    """Search returned no results."""
+
 
 class ScrapeFailedError(AgentError):
-    """网页爬取失败"""
+    """Page scraping failed."""
+
 
 class RagNotReadyError(AgentError):
-    """RAG 向量库未初始化"""
+    """Local RAG index is not ready."""
+
 
 class RateLimitError(AgentError):
-    """API 限速（429 / quota）"""
+    """Upstream provider returned a rate-limit style error."""
 
 
-# ══════════════════════════════════════════════
-# #4 工具注册表（扩充后）
-# ══════════════════════════════════════════════
+SKILL_REGISTRY = BUILTIN_SKILL_REGISTRY
+FINISH_TOOL_NAME = "finish"
 TOOLS: dict[str, dict] = {
-    "search": {
-        "desc": "搜索网络，获取相关网页标题和摘要列表",
-        "args": ["query"],
-    },
-    "search_site": {
-        "desc": "在指定网站内搜索，适合精准查找某域名下的内容",
-        "args": ["query", "site"],
-        "args_desc": {"query": "搜索词", "site": "限定域名，如 wikipedia.org"},
-    },
-    "scrape": {
-        "desc": "爬取指定 URL 的完整正文内容",
-        "args": ["url"],
-    },
-    "extract": {
-        "desc": "爬取指定 URL 并按指令提取特定信息（比 scrape 更精准）",
-        "args": ["url", "instruction"],
-        "args_desc": {"instruction": "告诉 AI 要提取什么，如：提取所有产品价格"},
-    },
-    "summarize": {
-        "desc": "对一段较长文本进行 AI 摘要，提炼核心要点",
-        "args": ["text"],
-    },
-    "rag_retrieve": {
-        "desc": "从用户已上传的本地文档中语义检索相关内容",
-        "args": ["query"],
-    },
-    "finish": {
+    **SKILL_REGISTRY.export_tool_dict(),
+    FINISH_TOOL_NAME: {
         "desc": "信息已足够，输出最终完整答案（Markdown 格式）",
         "args": ["answer"],
     },
 }
 
 
-# ══════════════════════════════════════════════
-# #1 Pydantic 校验模型
-# ══════════════════════════════════════════════
 class ReActAction(BaseModel):
     thought: str
     tool: str
@@ -100,159 +68,95 @@ class ReActAction(BaseModel):
 
     @field_validator("tool")
     @classmethod
-    def tool_must_be_known(cls, v: str) -> str:
-        if v not in TOOLS:
-            raise ValueError(
-                f"未知工具 '{v}'，可用工具：{list(TOOLS.keys())}"
-            )
-        return v
+    def tool_must_be_known(cls, value: str) -> str:
+        if value not in TOOLS:
+            raise ValueError(f"未知工具 '{value}'，可用工具：{list(TOOLS.keys())}")
+        return value
 
     @field_validator("args")
     @classmethod
-    def args_must_have_required(cls, v: dict, info) -> dict:
+    def args_must_have_required(cls, value: dict, info) -> dict:
         tool_name = info.data.get("tool", "")
         required = TOOLS.get(tool_name, {}).get("args", [])
-        missing = [k for k in required if k not in v]
+        missing = [key for key in required if key not in value]
         if missing:
-            raise ValueError(
-                f"工具 '{tool_name}' 缺少必填参数：{missing}"
-            )
-        return v
+            raise ValueError(f"工具 '{tool_name}' 缺少必填参数：{missing}")
+        return value
 
 
-# ══════════════════════════════════════════════
-# 内部：终止信号
-# ══════════════════════════════════════════════
 class _FinishSignal(Exception):
     def __init__(self, answer: str):
         self.answer = answer
 
 
-# ══════════════════════════════════════════════
-# #6 工具执行器（区分错误类型）
-# ══════════════════════════════════════════════
-def _run_tool(name: str, args: dict, progress_cb: Callable | None = None) -> str:
-    """
-    执行工具，返回观察结果字符串。
-    出错时抛出具体的 AgentError 子类，而非统一吞异常。
-    若 tool == "finish" 则 raise _FinishSignal。
-    """
-    if name == "finish":
+def _run_tool(
+    name: str,
+    args: dict,
+    *,
+    question: str,
+    engine: str,
+    history: list[dict],
+    observations: list[Observation],
+    registry: CitationRegistry,
+    progress_cb: Callable | None = None,
+) -> Observation:
+    if name == FINISH_TOOL_NAME:
         raise _FinishSignal(args.get("answer", ""))
 
-    # ── search ──────────────────────────────
-    if name == "search":
-        query = args.get("query", "").strip()
-        if progress_cb:
-            progress_cb(f"🔍 搜索：{query}")
-        results = web_search(query, max_results=5)
-        if not results:
-            raise SearchEmptyError(f"搜索 '{query}' 无结果，请换关键词")
-        lines = [
-            f"- [{r.get('title','无标题')}]({r.get('href','')})\n  {r.get('body','')[:200]}"
-            for r in results
-        ]
-        return "\n".join(lines)
+    ctx = SkillContext(
+        question=question,
+        engine=engine,
+        history=history,
+        observations=observations,
+        registry=registry,
+        progress_callback=progress_cb,
+    )
 
-    # ── search_site ──────────────────────────
-    if name == "search_site":
-        query = args.get("query", "").strip()
-        site  = args.get("site", "").strip()
-        full_query = f"site:{site} {query}" if site else query
-        if progress_cb:
-            progress_cb(f"🔍 定点搜索：{full_query}")
-        results = web_search(full_query, max_results=5)
-        if not results:
-            raise SearchEmptyError(f"在 {site} 内搜索 '{query}' 无结果")
-        lines = [
-            f"- [{r.get('title','无标题')}]({r.get('href','')})\n  {r.get('body','')[:200]}"
-            for r in results
-        ]
-        return "\n".join(lines)
+    try:
+        obs = SKILL_REGISTRY.run(name, ctx, args)
+    except KeyError as exc:
+        raise AgentError(str(exc)) from exc
+    except RuntimeError as exc:
+        err_str = str(exc)
+        lowered = err_str.lower()
+        if name == "rag_retrieve" and ("向量库" in err_str or "上传文档" in err_str):
+            raise RagNotReadyError(err_str) from exc
+        if any(token in lowered for token in ("429", "quota", "rate", "limit")):
+            raise RateLimitError(err_str) from exc
+        raise AgentError(err_str) from exc
+    except Exception as exc:
+        err_str = str(exc)
+        lowered = err_str.lower()
+        if any(token in lowered for token in ("429", "quota", "rate", "limit")):
+            raise RateLimitError(err_str) from exc
+        raise AgentError(err_str) from exc
 
-    # ── scrape ───────────────────────────────
-    if name == "scrape":
-        url = args.get("url", "").strip()
-        if progress_cb:
-            progress_cb(f"🌐 爬取：{url}")
-        content = fetch_via_jina(url, max_chars=6000)
-        if not content or content.startswith("（"):
-            raise ScrapeFailedError(f"爬取失败：{url}（返回内容为空或错误）")
-        return content[:6000]
+    if not obs.tool:
+        obs.tool = name
+    if not obs.args:
+        obs.args = dict(args)
 
-    # ── extract ──────────────────────────────
-    if name == "extract":
-        url         = args.get("url", "").strip()
-        instruction = args.get("instruction", "提取核心内容").strip()
-        if progress_cb:
-            progress_cb(f"🔎 提取：{url} → {instruction}")
-        content = fetch_via_jina(url, max_chars=8000)
-        if not content or content.startswith("（"):
-            raise ScrapeFailedError(f"爬取失败，无法提取：{url}")
-        # 调用 AI 按指令提取
-        extract_prompt = (
-            f"请从以下网页内容中，按照指令提取信息。\n\n"
-            f"指令：{instruction}\n\n"
-            f"网页内容：\n{content[:6000]}\n\n"
-            f"只输出提取结果，不要废话。"
-        )
-        result = ai_generate_role(extract_prompt, role="worker", structured=False)
-        return result
+    if name.startswith("search") and not obs.sources:
+        raise SearchEmptyError(f"搜索 '{args.get('query', '')}' 无结果，请尝试更换关键词。")
 
-    # ── summarize ────────────────────────────
-    if name == "summarize":
-        text = args.get("text", "").strip()
-        if not text:
-            return "（summarize：输入文本为空）"
-        if progress_cb:
-            progress_cb("📝 AI 摘要生成中…")
-        summary_prompt = (
-            f"请对以下文本进行简洁摘要，提炼核心要点，用中文输出，不超过 300 字：\n\n{text[:4000]}"
-        )
-        return ai_generate_role(summary_prompt, role="worker", structured=False)
+    if name.startswith("scrape") and not obs.sources:
+        raise ScrapeFailedError(f"抓取失败：{args.get('url', '') or args.get('urls', '')}")
 
-    # ── rag_retrieve ─────────────────────────
-    if name == "rag_retrieve":
-        query = args.get("query", "").strip()
-        if progress_cb:
-            progress_cb(f"📂 RAG 检索：{query}")
-        try:
-            import rag
-            if not rag.is_ready():
-                raise RagNotReadyError("本地文档向量库未初始化，请先上传文档")
-            return rag.retrieve_as_context(query, top_k=3)
-        except RagNotReadyError:
-            raise
-        except Exception as e:
-            # 区分是否为限速错误
-            err_str = str(e).lower()
-            if any(k in err_str for k in ("429", "quota", "rate", "limit")):
-                raise RateLimitError(f"RAG 检索触发限速：{e}")
-            raise AgentError(f"RAG 检索异常：{e}") from e
-
-    return f"未知工具：{name}"
+    return obs
 
 
-# ══════════════════════════════════════════════
-# #3 上下文压缩：压缩旧步骤的观察内容
-# ══════════════════════════════════════════════
 def _compress_history(history: list[dict]) -> list[dict]:
-    """
-    当历史超过 COMPRESS_AFTER 步时，
-    将前面的旧步骤观察截断为 OBS_COMPRESSED 字符，
-    保留最近 COMPRESS_AFTER 步完整。
-    """
     if len(history) <= COMPRESS_AFTER:
         return history
 
-    compressed = []
+    compressed: list[dict] = []
     cutoff = len(history) - COMPRESS_AFTER
 
-    for i, step in enumerate(history):
-        if i < cutoff:
+    for index, step in enumerate(history):
+        if index < cutoff:
             obs = step.get("observation", "")
             if len(obs) > OBS_COMPRESSED:
-                obs = obs[:OBS_COMPRESSED] + "…（已压缩）"
+                obs = obs[:OBS_COMPRESSED] + "...(已压缩)"
             compressed.append({**step, "observation": obs})
         else:
             compressed.append(step)
@@ -260,12 +164,20 @@ def _compress_history(history: list[dict]) -> list[dict]:
     return compressed
 
 
-# ══════════════════════════════════════════════
-# Prompt 构建
-# ══════════════════════════════════════════════
-def _build_prompt(question: str, history: list[dict]) -> str:
-    """把问题 + 压缩后的历史拼成当轮 user prompt"""
-    display = _compress_history(history)  # #3 先压缩再展示
+def _build_prompt(
+    question: str,
+    history: list[dict],
+    step_num: int = 0,
+    max_steps: int = 8,
+    registry: CitationRegistry | None = None,
+    force_finish: bool = False,
+) -> str:
+    """
+    组装当轮 user prompt。
+    除历史记录外，Stage 3 会追加「建议下一步」动态提示；
+    Stage 4 触发强制 finish 时会注入硬性指令。
+    """
+    display = _compress_history(history)
 
     lines = [f"用户问题：{question}", ""]
     if display:
@@ -276,31 +188,37 @@ def _build_prompt(question: str, history: list[dict]) -> str:
             lines.append(f"**工具**：{step['tool']}({step['args']})")
             obs = step.get("observation", "")
             if len(obs) > OBS_FULL_LEN:
-                obs = obs[:OBS_FULL_LEN] + "\n…（已截断）"
+                obs = obs[:OBS_FULL_LEN] + "\n...(已截断)"
             lines.append(f"**观察**：\n{obs}")
         lines.append("")
-    lines.append("请根据以上步骤的结果，决定下一步行动。如果信息已经足够，调用 finish 输出最终答案。")
+
+    # Stage 3：步间状态路由 —— 根据最近一步 obs / 已登记来源数 给出建议
+    hint = suggest_next_step(history, step_num=step_num, max_steps=max_steps, registry=registry)
+    if hint:
+        lines.append(hint)
+        lines.append("")
+
+    if force_finish:
+        lines.append(
+            "⛔ 系统判定无需继续检索，请本步直接调用 `finish`，基于已有观察输出答案。"
+        )
+    else:
+        lines.append(
+            "请根据以上步骤结果决定下一步行动。如果信息已经足够，请调用 finish 输出最终答案。"
+        )
     return "\n".join(lines)
 
 
-# ══════════════════════════════════════════════
-# #1 LLM 输出解析 + Pydantic 校验 + 重试
-# ══════════════════════════════════════════════
 def _parse_action(raw: str, engine: str, prompt: str, system: str) -> ReActAction:
-    """
-    解析 LLM 输出为 ReActAction。
-    若格式不合法，把错误反馈给 LLM 重试（最多 MAX_PARSE_RETRIES 次）。
-    """
-    last_error: str = ""
+    last_error = ""
 
     for attempt in range(MAX_PARSE_RETRIES + 1):
         if attempt > 0:
-            # 把上次的校验错误反馈给 LLM，让它修正
             retry_prompt = (
                 f"{prompt}\n\n"
-                f"【上一次输出格式有误，请修正】\n"
+                "【上一次输出格式有误，请修正】\n"
                 f"错误信息：{last_error}\n"
-                f"请重新输出符合格式的单个 JSON，不要有其他内容。"
+                "请重新输出符合格式的单个 JSON，不要有其他内容。"
             )
             raw = ai_generate_role(
                 retry_prompt,
@@ -317,70 +235,105 @@ def _parse_action(raw: str, engine: str, prompt: str, system: str) -> ReActActio
 
         try:
             return ReActAction(**data)
-        except ValidationError as e:
-            last_error = str(e)
+        except ValidationError as exc:
+            last_error = str(exc)
             continue
 
     raise LLMSchemaError(
-        f"LLM 输出经 {MAX_PARSE_RETRIES + 1} 次尝试仍不符合 schema。\n"
+        f"LLM 输出经过 {MAX_PARSE_RETRIES + 1} 次尝试仍不符合 schema。\n"
         f"最后错误：{last_error}\n最后原始输出：{raw[:300]}"
     )
 
 
-# ══════════════════════════════════════════════
-# ReAct 主循环
-# ══════════════════════════════════════════════
 def run_agent(
     question: str,
     engine: str = "",
     max_steps: int = 8,
     progress_callback: Callable | None = None,
+    registry: CitationRegistry | None = None,
+    compose: bool = True,
+    use_router: bool = True,
+    question_type: QuestionType | None = None,
 ) -> dict:
     """
     ReAct Agent 主入口。
 
-    参数：
-        question:          用户问题
-        engine:            引擎预设（"deep" | "fast" | ""）
-        max_steps:         最大循环轮数
-        progress_callback: 进度回调 fn(msg: str)
+    Stage A + 路由强化后的关键点：
+      - classify_question 产出 QuestionType（若调用方未传）
+      - route_entry 生成 skill 白名单 + 起手建议，只把这些喂给 LLM
+      - 每步通过 suggest_next_step 注入下一步建议
+      - check_loop 检测重复/无新来源，必要时强制 finish
+      - finish 与 fallback 都走 compose_report，复用同一个 QuestionType
 
-    返回：
+    Returns:
         {
-            "answer":     str,
-            "steps":      list[dict],   # {thought, tool, args, observation, error_type?}
-            "step_count": int,
-            "error":      str | None,
+            "answer": str, "steps": list[dict], "observations": list[dict],
+            "registry": CitationRegistry, "question_type": str,
+            "allowed_skills": list[str], "step_count": int, "error": str | None,
         }
     """
     history: list[dict] = []
-    system = prompt_react_system(TOOLS)
+    observations: list[Observation] = []
+    if registry is None:
+        registry = CitationRegistry()
+
+    # ── 入口预路由（Stage 1） ──
+    if use_router:
+        qtype = question_type or classify_question(question, engine)
+        route = route_entry(qtype, BUILTIN_SKILL_REGISTRY.names())
+        allowed_skills = route.allowed_skills
+        starter_hint = route.starter
+        if progress_callback:
+            progress_callback(
+                f"🧭 预路由：问题类型 = {qtype.value}，"
+                f"候选工具 = {allowed_skills}，起手 = {starter_hint}"
+            )
+    else:
+        qtype = question_type or QuestionType.RESEARCH
+        allowed_skills = [n for n in TOOLS.keys() if n != FINISH_TOOL_NAME]
+        starter_hint = ""
+
+    # Stage 2：按白名单过滤工具字典（finish 恒保留）
+    allow_set = set(allowed_skills) | {FINISH_TOOL_NAME}
+    effective_tools = {k: v for k, v in TOOLS.items() if k in allow_set}
+    system = prompt_react_system(
+        effective_tools,
+        allowed_skills=allowed_skills,
+        starter_hint=starter_hint,
+    )
+
+    force_finish_next = False
 
     try:
         for step_num in range(max_steps):
             if progress_callback:
-                progress_callback(f"第 {step_num + 1} 步推理中…")
+                progress_callback(f"第 {step_num + 1} 步推理中...")
 
-            prompt = _build_prompt(question, history)
-
-            # ── #2 优先尝试原生 Function Calling，失败降级 JSON 模式 ──
+            prompt = _build_prompt(
+                question, history,
+                step_num=step_num, max_steps=max_steps,
+                registry=registry, force_finish=force_finish_next,
+            )
             action: ReActAction | None = None
+
             try:
                 tool_name, tool_args, thought = ai_tool_call(
-                    prompt, system=system, tools=TOOLS,
-                    role="orchestrator", engine=engine,
+                    prompt,
+                    system=system,
+                    tools=effective_tools,
+                    role="orchestrator",
+                    engine=engine,
                 )
                 action = ReActAction(
                     thought=thought or f"(原生调用 {tool_name})",
                     tool=tool_name,
                     args=tool_args,
                 )
-                print(f"[Agent] 步骤 {step_num + 1} 使用原生调用 → {tool_name}")
+                print(f"[Agent] Step {step_num + 1} native call -> {tool_name}")
             except Exception as native_err:
-                print(f"[Agent] 原生调用失败，降级 JSON 模式: {native_err}")
+                print(f"[Agent] Native function calling failed, fallback to JSON: {native_err}")
 
             if action is None:
-                # 降级：JSON 模式
                 raw = ai_generate_role(
                     prompt,
                     system=system,
@@ -390,115 +343,179 @@ def run_agent(
                 )
                 try:
                     action = _parse_action(raw, engine, prompt, system)
-                except LLMSchemaError as e:
+                except LLMSchemaError as exc:
                     history.append({
                         "thought": "(格式错误)",
                         "tool": "none",
                         "args": {},
-                        "observation": str(e),
+                        "observation": str(exc),
                         "error_type": "LLMSchemaError",
                     })
                     continue
 
-            # 执行工具
-            try:
-                observation = _run_tool(action.tool, action.args, progress_callback)
+            # Stage 2 强校验：LLM 调了白名单外的工具 → 记录错误并重试
+            if action.tool not in allow_set:
+                history.append({
+                    "thought": action.thought,
+                    "tool": action.tool,
+                    "args": action.args,
+                    "observation": (
+                        f"[越权] 工具 `{action.tool}` 不在本次对话白名单 {sorted(allow_set)} 中，"
+                        f"请从可用工具中重选。"
+                    ),
+                    "sources": [],
+                    "cite_ids": [],
+                    "error_type": "NotAllowedSkill",
+                })
+                continue
 
+            # Stage 4：重复 / 误选纠偏
+            guard = check_loop(
+                action.tool, action.args, history,
+                registry_size_before=len(registry),
+                registry_size_now=len(registry),
+            )
+            if not guard.ok:
+                history.append({
+                    "thought": action.thought,
+                    "tool": action.tool,
+                    "args": action.args,
+                    "observation": f"[纠偏] {guard.reason}",
+                    "sources": [],
+                    "cite_ids": [],
+                    "error_type": "LoopGuard",
+                })
+                continue
+            if guard.force_finish and action.tool != FINISH_TOOL_NAME:
+                # 下一轮强制 finish；本步放行以收集最后一条观察
+                force_finish_next = True
+                if progress_callback:
+                    progress_callback(guard.warning or "⛔ 强制进入 finish")
+
+            try:
+                obs = _run_tool(
+                    action.tool,
+                    action.args,
+                    question=question,
+                    engine=engine,
+                    history=history,
+                    observations=observations,
+                    registry=registry,
+                    progress_cb=progress_callback,
+                )
             except _FinishSignal as fin:
                 history.append({
                     "thought": action.thought,
-                    "tool": "finish",
+                    "tool": FINISH_TOOL_NAME,
                     "args": action.args,
                     "observation": "(任务完成)",
+                    "sources": [],
+                    "cite_ids": [],
                 })
+                if compose:
+                    if progress_callback:
+                        progress_callback("编排最终报告（分型模板 + 引用来源）")
+                    answer = compose_report(
+                        question, observations, registry,
+                        engine=engine, question_type=qtype,
+                    )
+                else:
+                    answer = fin.answer
                 return {
-                    "answer": fin.answer,
+                    "answer": answer,
                     "steps": history,
+                    "observations": [o.model_dump() for o in observations],
+                    "registry": registry,
+                    "question_type": qtype.value,
+                    "allowed_skills": allowed_skills,
                     "step_count": step_num + 1,
                     "error": None,
                 }
-
-            # #6 分类错误，记录 error_type，继续循环（不崩溃）
-            except SearchEmptyError as e:
-                observation = f"[搜索为空] {e}"
-                history.append({
-                    "thought": action.thought, "tool": action.tool,
-                    "args": action.args, "observation": observation,
-                    "error_type": "SearchEmptyError",
-                })
+            except SearchEmptyError as exc:
+                _append_error(history, action, f"[搜索为空] {exc}", "SearchEmptyError")
+                continue
+            except ScrapeFailedError as exc:
+                _append_error(history, action, f"[抓取失败] {exc}", "ScrapeFailedError")
+                continue
+            except RagNotReadyError as exc:
+                _append_error(history, action, f"[RAG 未就绪] {exc}", "RagNotReadyError")
+                continue
+            except RateLimitError as exc:
+                _append_error(history, action, f"[限流] {exc}", "RateLimitError")
+                continue
+            except AgentError as exc:
+                _append_error(history, action, f"[工具错误] {exc}", "AgentError")
                 continue
 
-            except ScrapeFailedError as e:
-                observation = f"[爬取失败] {e}"
-                history.append({
-                    "thought": action.thought, "tool": action.tool,
-                    "args": action.args, "observation": observation,
-                    "error_type": "ScrapeFailedError",
-                })
-                continue
-
-            except RagNotReadyError as e:
-                observation = f"[RAG未就绪] {e}"
-                history.append({
-                    "thought": action.thought, "tool": action.tool,
-                    "args": action.args, "observation": observation,
-                    "error_type": "RagNotReadyError",
-                })
-                continue
-
-            except RateLimitError as e:
-                observation = f"[限速] {e}，等待后重试或换关键词"
-                history.append({
-                    "thought": action.thought, "tool": action.tool,
-                    "args": action.args, "observation": observation,
-                    "error_type": "RateLimitError",
-                })
-                continue
-
-            except AgentError as e:
-                observation = f"[工具错误] {e}"
-                history.append({
-                    "thought": action.thought, "tool": action.tool,
-                    "args": action.args, "observation": observation,
-                    "error_type": "AgentError",
-                })
-                continue
-
+            cite_ids = registry.add_many(obs.sources)
+            obs.cite_ids = cite_ids
+            observations.append(obs)
             history.append({
                 "thought": action.thought,
                 "tool": action.tool,
                 "args": action.args,
-                "observation": observation,
+                "observation": obs.content,
+                "sources": [s.model_dump() for s in obs.sources],
+                "cite_ids": cite_ids,
             })
 
-        # 超过 max_steps，强制汇总
         if progress_callback:
-            progress_callback("已达最大步数，强制生成最终答案…")
+            progress_callback("已达最大步数，编排最终报告...")
 
-        fallback_prompt = (
-            f"用户问题：{question}\n\n"
-            "以下是调研过程中收集到的所有信息：\n\n"
-            + "\n\n".join(
-                f"【步骤{i+1}观察】\n{s['observation']}"
-                for i, s in enumerate(history)
-                if s.get("observation") and s["observation"] != "(任务完成)"
+        if compose:
+            answer = compose_report(
+                question, observations, registry,
+                engine=engine, question_type=qtype,
             )
-            + "\n\n请综合以上信息，写出完整、结构清晰的最终答案（Markdown 格式）。"
-        )
-        answer = ai_generate_role(
-            fallback_prompt, role="analyst", engine=engine, structured=False,
-        )
+        else:
+            fallback_prompt = (
+                f"用户问题：{question}\n\n"
+                "以下是调研过程中收集到的所有信息：\n\n"
+                + "\n\n".join(
+                    f"【步骤 {i + 1} 观察】\n{o.content}"
+                    for i, o in enumerate(observations)
+                    if o.content
+                )
+                + "\n\n请综合以上信息，写出完整、结构清晰的最终答案（Markdown 格式）。"
+            )
+            answer = ai_generate_role(
+                fallback_prompt,
+                role="analyst",
+                engine=engine,
+                structured=False,
+            )
+
         return {
             "answer": answer,
             "steps": history,
+            "observations": [o.model_dump() for o in observations],
+            "registry": registry,
+            "question_type": qtype.value,
+            "allowed_skills": allowed_skills,
             "step_count": max_steps,
             "error": None,
         }
 
-    except Exception as e:
+    except Exception as exc:
         return {
-            "answer": f"Agent 运行出错：{e}",
+            "answer": f"Agent 运行出错：{exc}",
             "steps": history,
+            "observations": [o.model_dump() for o in observations],
+            "registry": registry,
+            "question_type": qtype.value if use_router else "research",
+            "allowed_skills": allowed_skills,
             "step_count": len(history),
             "error": traceback.format_exc(),
         }
+
+
+def _append_error(history: list[dict], action: ReActAction, msg: str, err_type: str) -> None:
+    history.append({
+        "thought": action.thought,
+        "tool": action.tool,
+        "args": action.args,
+        "observation": msg,
+        "sources": [],
+        "cite_ids": [],
+        "error_type": err_type,
+    })

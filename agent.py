@@ -252,7 +252,8 @@ def _schema_for_tools(tools: dict, fmt: str) -> list:
         declarations = []
         for name, info in tools.items():
             props = {}
-            for arg in info["args"]:
+            all_args = list(dict.fromkeys(list(info.get("args", [])) + list(info.get("optional_args", []))))
+            for arg in all_args:
                 desc = info.get("args_desc", {}).get(arg, arg)
                 props[arg] = {"type": "string", "description": desc}
             declarations.append({
@@ -261,7 +262,7 @@ def _schema_for_tools(tools: dict, fmt: str) -> list:
                 "parameters": {
                     "type": "object",
                     "properties": props,
-                    "required": info["args"],
+                    "required": info.get("args", []),
                 },
             })
         return [{"function_declarations": declarations}]
@@ -270,7 +271,8 @@ def _schema_for_tools(tools: dict, fmt: str) -> list:
         result = []
         for name, info in tools.items():
             props = {}
-            for arg in info["args"]:
+            all_args = list(dict.fromkeys(list(info.get("args", [])) + list(info.get("optional_args", []))))
+            for arg in all_args:
                 desc = info.get("args_desc", {}).get(arg, arg)
                 props[arg] = {"type": "string", "description": desc}
             result.append({
@@ -279,7 +281,7 @@ def _schema_for_tools(tools: dict, fmt: str) -> list:
                 "input_schema": {
                     "type": "object",
                     "properties": props,
-                    "required": info["args"],
+                    "required": info.get("args", []),
                 },
             })
         return result
@@ -288,7 +290,8 @@ def _schema_for_tools(tools: dict, fmt: str) -> list:
     result = []
     for name, info in tools.items():
         props = {}
-        for arg in info["args"]:
+        all_args = list(dict.fromkeys(list(info.get("args", [])) + list(info.get("optional_args", []))))
+        for arg in all_args:
             desc = info.get("args_desc", {}).get(arg, arg)
             props[arg] = {"type": "string", "description": desc}
         result.append({
@@ -299,7 +302,7 @@ def _schema_for_tools(tools: dict, fmt: str) -> list:
                 "parameters": {
                     "type": "object",
                     "properties": props,
-                    "required": info["args"],
+                    "required": info.get("args", []),
                 },
             },
         })

@@ -1,19 +1,86 @@
 openapi: 3.1.0
 info:
   title: DeepResearch Agent API
-  description: AI 深度研究 Agent：自动搜索、爬取、RAG 检索，多步推理后输出完整研究报告。
-  version: 1.0.0
+  version: 1.2.0
+  description: >
+    HTTP wrapper for the DeepResearch ReAct workflow. Returns the final report,
+    step trace, structured observations, deduplicated references, and built-in
+    skill metadata.
 servers:
-  - url: https://你的ngrok地址.ngrok-free.app
-    description: 本地服务（通过 ngrok 暴露）
+  - url: https://buccaneer-recent-dropout.ngrok-free.dev
+    description: Public tunnel to the local service
 paths:
+  /health:
+    get:
+      operationId: healthCheck
+      summary: Health check
+      responses:
+        "200":
+          description: Service is available
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /skills:
+    get:
+      operationId: listBuiltInSkills
+      summary: List available built-in skills
+      description: >
+        Return the built-in skill catalog used by the ReAct agent, including
+        category, required arguments, optional arguments, and descriptions.
+      responses:
+        "200":
+          description: Skill catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_skills:
+                    type: integer
+                    description: Number of registered built-in skills
+                  categories:
+                    type: array
+                    description: Skill categories
+                    items:
+                      type: string
+                  skills:
+                    type: array
+                    description: Available built-in skills
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        description:
+                          type: string
+                        category:
+                          type: string
+                        required_args:
+                          type: array
+                          items:
+                            type: string
+                        optional_args:
+                          type: array
+                          items:
+                            type: string
+                        args_desc:
+                          type: object
+                          additionalProperties:
+                            type: string
+                        returns_sources:
+                          type: boolean
   /run:
     post:
       operationId: runDeepResearchAgent
-      summary: 运行 DeepResearch Agent
+      summary: Run DeepResearch Agent
       description: >
-        输入研究问题，Agent 自主决策调用搜索、爬取、RAG 检索等工具，
-        多步推理后返回完整的 Markdown 格式研究报告及每步思考过程。
+        Execute the ReAct research workflow for a question and return the final
+        markdown report, step trace, structured observations, and references.
       requestBody:
         required: true
         content:
@@ -25,21 +92,22 @@ paths:
               properties:
                 question:
                   type: string
-                  description: 研究问题，例如：特斯拉 2024 年的核心财务指标是什么？
+                  description: Research question
+                  example: What were Tesla's core financial metrics in 2024?
                 engine:
                   type: string
-                  description: "引擎模式：deep（全球最强模型，需 VPN）| fast（国内直连）| 空字符串（自动）"
+                  description: Engine preset. Use "deep", "fast", or empty for auto.
                   default: ""
                   enum: ["", "deep", "fast"]
                 max_steps:
                   type: integer
-                  description: Agent 最大推理步数，默认 8
+                  description: Maximum number of ReAct steps
                   default: 8
                   minimum: 3
                   maximum: 15
       responses:
         "200":
-          description: 成功返回研究报告
+          description: Successful response
           content:
             application/json:
               schema:
@@ -47,13 +115,91 @@ paths:
                 properties:
                   answer:
                     type: string
-                    description: 最终研究报告（Markdown 格式）
+                    description: Final markdown report
                   step_count:
                     type: integer
-                    description: 实际执行步数
+                    description: Actual number of executed steps
                   error:
                     type: string
                     nullable: true
-                    description: 如有错误，此处返回详情
+                    description: Execution error, if any
+                  references_md:
+                    type: string
+                    description: Markdown reference section
+                  references:
+                    type: array
+                    description: Deduplicated references
+                    items:
+                      type: object
+                      properties:
+                        cite_id:
+                          type: integer
+                        url:
+                          type: string
+                        title:
+                          type: string
+                        snippet:
+                          type: string
+                  observations:
+                    type: array
+                    description: Structured observations collected during execution
+                    items:
+                      type: object
+                      properties:
+                        content:
+                          type: string
+                        tool:
+                          type: string
+                        args:
+                          type: object
+                          additionalProperties: true
+                        cite_ids:
+                          type: array
+                          items:
+                            type: integer
+                        sources:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              url:
+                                type: string
+                              title:
+                                type: string
+                              snippet:
+                                type: string
+                  steps:
+                    type: array
+                    description: ReAct step trace
+                    items:
+                      type: object
+                      properties:
+                        thought:
+                          type: string
+                        tool:
+                          type: string
+                        args:
+                          type: object
+                          additionalProperties: true
+                        observation:
+                          type: string
+                        cite_ids:
+                          type: array
+                          items:
+                            type: integer
+                        error_type:
+                          type: string
+                          nullable: true
+                        sources:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              url:
+                                type: string
+                              title:
+                                type: string
+                              snippet:
+                                type: string
         "400":
-          description: 请求参数错误
+          description: Invalid request

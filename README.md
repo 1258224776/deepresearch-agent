@@ -75,7 +75,7 @@ cd deepresearch-agent
 
 **2. 安装依赖**
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 **3. 配置 API Key**
@@ -98,7 +98,7 @@ ANTHROPIC_API_KEY=你的Key
 
 **4. 启动**
 ```bash
-streamlit run app.py
+python -m streamlit run app.py
 ```
 
 浏览器访问 `http://localhost:8501`

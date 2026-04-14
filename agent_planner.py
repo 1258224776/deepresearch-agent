@@ -9,8 +9,8 @@ agent_planner.py — 深度规划 Agent（Planner / Executor / Memory / Reporter
 执行流程：
   1. Planner  — orchestrator LLM 把大问题拆解为 3-5 个子问题
   2. Executor — 对每个子问题运行精简 ReAct 循环（最多 SUB_MAX_STEPS 步）
-  3. Memory   — 把前序子问题的关键发现作为上下文注入后续执行
-  4. Reporter — analyst LLM 综合所有发现，生成结构化最终报告
+  3. Memory   — 把前序子问题的关键发现 + 已登记的引用编号注入后续执行
+  4. Reporter — report.compose_report 综合所有 Observation，生成带引用的最终报告
 """
 
 from __future__ import annotations
@@ -22,7 +22,8 @@ from pydantic import BaseModel, field_validator, ValidationError
 
 from agent import ai_generate_role, extract_json
 from agent_loop import run_agent
-from prompts import prompt_plan_research, prompt_synthesize_report
+from prompts import prompt_plan_research
+from report import Observation, CitationRegistry, QuestionType, classify_question, compose_report
 
 # ── 每个子问题的 ReAct 循环步数上限 ──
 SUB_MAX_STEPS = 4
@@ -44,12 +45,13 @@ class ResearchPlan(BaseModel):
     def must_have_questions(cls, v: list[str]) -> list[str]:
         if not v:
             raise ValueError("sub_questions 不能为空")
-        return [q.strip() for q in v if q.strip()][:5]  # 最多保留 5 个
+        return [q.strip() for q in v if q.strip()][:5]
 
 
 class SubResult(BaseModel):
     sub_q: str
     answer: str
+    observations: list[dict] = []
     step_count: int
     error: str | None = None
 
@@ -59,16 +61,9 @@ class SubResult(BaseModel):
 # ══════════════════════════════════════════════
 
 def _plan_research(question: str, engine: str) -> ResearchPlan:
-    """
-    调用 orchestrator LLM，把问题拆解为若干子问题。
-    若 LLM 输出解析失败，回退到只含原问题的单子问题列表。
-    """
     prompt = prompt_plan_research(question)
     raw = ai_generate_role(
-        prompt,
-        role="orchestrator",
-        engine=engine,
-        structured=True,
+        prompt, role="orchestrator", engine=engine, structured=True,
     )
     data = extract_json(raw)
     if not data or not isinstance(data, dict):
@@ -90,26 +85,27 @@ def _plan_research(question: str, engine: str) -> ResearchPlan:
 # ══════════════════════════════════════════════
 
 class PlannerMemory:
-    """
-    轻量共享记忆：记录已完成的子问题及其核心发现。
-    后续子执行器读取 as_context() 注入问题前缀，避免重复研究。
-    """
-    def __init__(self) -> None:
-        self._items: list[SubResult] = []
+    """记录已完成的子问题及其摘要，注入后续执行器作为背景上下文。"""
 
-    def add(self, result: SubResult) -> None:
-        self._items.append(result)
+    def __init__(self) -> None:
+        self._items: list[tuple[str, str, list[int]]] = []  # (sub_q, answer, cite_ids)
+
+    def add(self, sub_q: str, answer: str, cite_ids: list[int]) -> None:
+        self._items.append((sub_q, answer, cite_ids))
 
     def as_context(self) -> str:
-        """返回已有发现的简短摘要（可注入到下一个子问题的 prompt 前缀）。"""
         if not self._items:
             return ""
-        lines = ["## 已完成的子问题调研结论（供参考）\n"]
-        for r in self._items:
-            snippet = r.answer[:MEMORY_SNIPPET_LEN]
-            if len(r.answer) > MEMORY_SNIPPET_LEN:
+        lines = ["## 已完成的子问题调研结论（供参考，可复用其引用编号）\n"]
+        for sub_q, answer, cite_ids in self._items:
+            snippet = answer[:MEMORY_SNIPPET_LEN]
+            if len(answer) > MEMORY_SNIPPET_LEN:
                 snippet += "…（已截断）"
-            lines.append(f"**{r.sub_q}**\n{snippet}\n")
+            cite_str = (
+                "，可引用：" + "".join(f"[{i}]" for i in cite_ids)
+                if cite_ids else ""
+            )
+            lines.append(f"**{sub_q}**{cite_str}\n{snippet}\n")
         return "\n".join(lines)
 
 
@@ -120,12 +116,13 @@ class PlannerMemory:
 def _execute_sub(
     sub_q: str,
     memory: PlannerMemory,
+    registry: CitationRegistry,
     engine: str,
     progress_cb: Callable | None = None,
-) -> SubResult:
+) -> tuple[SubResult, list[Observation]]:
     """
-    对单个子问题运行最多 SUB_MAX_STEPS 步的 ReAct 循环。
-    如果 memory 里有前序发现，把它拼接到子问题前面作为背景上下文。
+    对单个子问题运行最多 SUB_MAX_STEPS 步的 ReAct 循环，
+    共享全局 CitationRegistry，让所有子问题的引用编号连贯。
     """
     context = memory.as_context()
     enhanced_q = f"{context}\n\n## 当前子问题\n{sub_q}" if context else sub_q
@@ -135,35 +132,39 @@ def _execute_sub(
         engine=engine,
         max_steps=SUB_MAX_STEPS,
         progress_callback=progress_cb,
+        registry=registry,
+        compose=False,  # 子问题不单独编排，最后统一由 Reporter 汇总
     )
-    return SubResult(
+    # 从返回值重建 Observation 列表
+    obs_list = [Observation(**o) for o in result.get("observations", [])]
+    sub_r = SubResult(
         sub_q=sub_q,
         answer=result.get("answer", "（无结果）"),
+        observations=result.get("observations", []),
         step_count=result.get("step_count", 0),
         error=result.get("error"),
     )
+    return sub_r, obs_list
 
 
 # ══════════════════════════════════════════════
-# Reporter：综合报告
+# Reporter：综合报告（走 compose_report）
 # ══════════════════════════════════════════════
 
 def _synthesize(
     question: str,
-    sub_results: list[SubResult],
+    all_observations: list[Observation],
+    registry: CitationRegistry,
     engine: str,
+    question_type: QuestionType | None = None,
     progress_cb: Callable | None = None,
 ) -> str:
-    """
-    调用 analyst LLM，把所有子结果综合成最终报告。
-    """
     if progress_cb:
-        progress_cb("📝 综合所有发现，生成最终报告…")
-    prompt = prompt_synthesize_report(
-        question,
-        [{"sub_q": r.sub_q, "answer": r.answer} for r in sub_results],
+        progress_cb("📝 综合所有发现，编排最终报告（分型模板 + 引用溯源）…")
+    return compose_report(
+        question, all_observations, registry,
+        engine=engine, question_type=question_type,
     )
-    return ai_generate_role(prompt, role="analyst", engine=engine, structured=False)
 
 
 # ══════════════════════════════════════════════
@@ -178,24 +179,30 @@ def run_planner_agent(
     """
     深度规划 Agent 主入口。
 
-    参数：
-        question:          用户的核心研究问题
-        engine:            引擎预设（"deep" | "fast" | ""）
-        progress_callback: 进度回调 fn(msg: str)
-
     返回：
         {
-            "answer":       str,             # 最终综合报告
-            "plan":         dict,            # 研究计划 {reasoning, sub_questions}
-            "sub_results":  list[dict],      # 每个子问题的结果 {sub_q, answer, step_count}
-            "total_steps":  int,             # 所有子循环的步数之和
+            "answer":       str,           # 最终综合报告
+            "plan":         dict,          # {reasoning, sub_questions}
+            "sub_results":  list[dict],    # 每个子问题的结果（含 observations）
+            "registry":     CitationRegistry,
+            "total_steps":  int,
             "error":        str | None,
         }
     """
     sub_results: list[SubResult] = []
+    all_obs: list[Observation] = []
+    registry = CitationRegistry()
+    memory = PlannerMemory()
     plan: ResearchPlan | None = None
 
     try:
+        # ── 0. 主问题分类（一次到底，用于最终报告的分型模板） ──
+        if progress_callback:
+            progress_callback("🧭 识别主问题类型…")
+        main_qtype = classify_question(question, engine)
+        if progress_callback:
+            progress_callback(f"📌 主问题类型：{main_qtype.value}")
+
         # ── 1. Planner ──
         if progress_callback:
             progress_callback("🗺️ 规划研究方向，拆解子问题…")
@@ -206,37 +213,51 @@ def run_planner_agent(
             )
 
         # ── 2. Executor + Memory ──
-        memory = PlannerMemory()
         for idx, sub_q in enumerate(plan.sub_questions, 1):
             if progress_callback:
                 progress_callback(
                     f"🔬 [{idx}/{len(plan.sub_questions)}] 调研子问题：{sub_q}"
                 )
 
-            def _sub_cb(msg: str, _sub_q=sub_q, _idx=idx) -> None:
+            def _sub_cb(msg: str, _idx=idx) -> None:
                 if progress_callback:
                     progress_callback(f"  [{_idx}] {msg}")
 
-            sub_r = _execute_sub(sub_q, memory, engine, _sub_cb)
-            memory.add(sub_r)
+            sub_r, obs_list = _execute_sub(
+                sub_q, memory, registry, engine, _sub_cb,
+            )
+            all_obs.extend(obs_list)
+            # 收集该子问题下所有 cite_ids 供 memory 复用
+            cite_ids: list[int] = []
+            for o in obs_list:
+                cite_ids.extend(o.cite_ids)
+            cite_ids = sorted(set(cite_ids))
+            memory.add(sub_q, sub_r.answer, cite_ids)
             sub_results.append(sub_r)
 
         # ── 3. Reporter ──
-        final_answer = _synthesize(question, sub_results, engine, progress_callback)
+        final_answer = _synthesize(
+            question, all_obs, registry, engine,
+            question_type=main_qtype, progress_cb=progress_callback,
+        )
 
         return {
-            "answer":      final_answer,
-            "plan":        plan.model_dump(),
-            "sub_results": [r.model_dump() for r in sub_results],
-            "total_steps": sum(r.step_count for r in sub_results),
-            "error":       None,
+            "answer":        final_answer,
+            "plan":          plan.model_dump(),
+            "sub_results":   [r.model_dump() for r in sub_results],
+            "registry":      registry,
+            "question_type": main_qtype.value,
+            "total_steps":   sum(r.step_count for r in sub_results),
+            "error":         None,
         }
 
     except Exception as e:
         return {
-            "answer":      f"规划 Agent 运行出错：{e}",
-            "plan":        plan.model_dump() if plan else {},
-            "sub_results": [r.model_dump() for r in sub_results],
-            "total_steps": sum(r.step_count for r in sub_results),
-            "error":       traceback.format_exc(),
+            "answer":        f"规划 Agent 运行出错：{e}",
+            "plan":          plan.model_dump() if plan else {},
+            "sub_results":   [r.model_dump() for r in sub_results],
+            "registry":      registry,
+            "question_type": "research",
+            "total_steps":   sum(r.step_count for r in sub_results),
+            "error":         traceback.format_exc(),
         }

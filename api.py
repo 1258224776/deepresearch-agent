@@ -1,14 +1,8 @@
 """
-api.py — FastAPI 封装，将 DeepResearch Agent 暴露为 HTTP 工具
+FastAPI wrapper for the DeepResearch Agent.
 
-供 Dify 等平台通过 OpenAPI 规范调用。
-
-启动方式：
-    pip install fastapi uvicorn
-    uvicorn api:app --host 0.0.0.0 --port 8000
-
-公网暴露（测试用）：
-    ngrok http 8000
+Exposes the ReAct workflow over HTTP so external tools can consume
+the final report, step trace, structured observations, and references.
 """
 
 from __future__ import annotations
@@ -18,17 +12,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from agent_loop import run_agent
+from skills import BUILTIN_SKILL_REGISTRY
 
-# ══════════════════════════════════════════════
-# 应用实例
-# ══════════════════════════════════════════════
+
 app = FastAPI(
     title="DeepResearch Agent API",
-    description="AI 深度研究 Agent：自动搜索、爬取、RAG 检索，多步推理后输出完整研究报告。",
-    version="1.0.0",
+    description=(
+        "AI research agent with search, scraping, local RAG, structured "
+        "observations, cited final reports, and inspectable skill metadata."
+    ),
+    version="1.2.0",
 )
 
-# 允许 Dify 跨域调用
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,70 +32,193 @@ app.add_middleware(
 )
 
 
-# ══════════════════════════════════════════════
-# 数据模型
-# ══════════════════════════════════════════════
 class RunRequest(BaseModel):
-    question: str = Field(..., description="研究问题，例如：特斯拉 2024 年的核心财务指标是什么？")
+    question: str = Field(..., description="Research question")
     engine: str = Field(
         default="",
-        description="引擎模式：deep（全球最强模型，需 VPN）| fast（国内直连）| 空字符串（自动）",
+        description='Engine preset: "deep", "fast", or empty for auto.',
     )
-    max_steps: int = Field(default=8, ge=3, le=15, description="Agent 最大推理步数，默认 8")
+    max_steps: int = Field(
+        default=8,
+        ge=3,
+        le=15,
+        description="Maximum number of ReAct steps",
+    )
+
+
+class SourceInfo(BaseModel):
+    url: str = ""
+    title: str = ""
+    snippet: str = ""
 
 
 class StepInfo(BaseModel):
-    thought: str
-    tool: str
-    args: dict
-    observation: str
+    thought: str = ""
+    tool: str = ""
+    args: dict = Field(default_factory=dict)
+    observation: str = ""
+    sources: list[SourceInfo] = Field(default_factory=list)
+    cite_ids: list[int] = Field(default_factory=list)
+    error_type: str | None = None
+
+
+class ObservationInfo(BaseModel):
+    content: str = ""
+    sources: list[SourceInfo] = Field(default_factory=list)
+    tool: str = ""
+    args: dict = Field(default_factory=dict)
+    cite_ids: list[int] = Field(default_factory=list)
+
+
+class ReferenceInfo(BaseModel):
+    cite_id: int
+    url: str
+    title: str = ""
+    snippet: str = ""
 
 
 class RunResponse(BaseModel):
-    answer: str = Field(..., description="最终研究报告（Markdown 格式）")
-    steps: list[StepInfo] = Field(..., description="Agent 每步推理过程")
-    step_count: int = Field(..., description="实际执行步数")
-    error: str | None = Field(default=None, description="如有错误，此处返回详情")
+    answer: str = Field(..., description="Final markdown report")
+    steps: list[StepInfo] = Field(default_factory=list, description="Per-step trace")
+    observations: list[ObservationInfo] = Field(
+        default_factory=list,
+        description="Structured observations collected during execution",
+    )
+    references: list[ReferenceInfo] = Field(
+        default_factory=list,
+        description="Deduplicated references derived from cite ids",
+    )
+    references_md: str = Field(
+        default="",
+        description="Markdown reference section for direct rendering",
+    )
+    step_count: int = Field(..., description="Actual number of executed steps")
+    error: str | None = Field(default=None, description="Execution error, if any")
 
 
-# ══════════════════════════════════════════════
-# 接口
-# ══════════════════════════════════════════════
-@app.get("/health", summary="健康检查")
-def health():
+class SkillInfo(BaseModel):
+    name: str
+    description: str
+    category: str
+    required_args: list[str] = Field(default_factory=list)
+    optional_args: list[str] = Field(default_factory=list)
+    args_desc: dict[str, str] = Field(default_factory=dict)
+    returns_sources: bool = True
+
+
+class SkillCatalogResponse(BaseModel):
+    total_skills: int = Field(..., description="Number of registered built-in skills")
+    categories: list[str] = Field(default_factory=list, description="Skill categories")
+    skills: list[SkillInfo] = Field(default_factory=list, description="Available built-in skills")
+
+
+def _build_references(observations: list[dict]) -> tuple[list[ReferenceInfo], str]:
+    ref_map: dict[int, ReferenceInfo] = {}
+
+    for obs in observations:
+        sources = obs.get("sources", []) or []
+        cite_ids = obs.get("cite_ids", []) or []
+
+        for idx, source in enumerate(sources):
+            cite_id = cite_ids[idx] if idx < len(cite_ids) else None
+            url = source.get("url", "")
+            if not cite_id or not url or cite_id in ref_map:
+                continue
+
+            ref_map[cite_id] = ReferenceInfo(
+                cite_id=cite_id,
+                url=url,
+                title=source.get("title", ""),
+                snippet=source.get("snippet", ""),
+            )
+
+    references = [ref_map[key] for key in sorted(ref_map)]
+    if not references:
+        return [], ""
+
+    refs_md = "## References\n\n" + "\n".join(
+        f"{ref.cite_id}. [{ref.title or ref.url}]({ref.url})"
+        for ref in references
+    )
+    return references, refs_md
+
+
+def _build_skill_catalog() -> SkillCatalogResponse:
+    skills_raw = BUILTIN_SKILL_REGISTRY.as_metadata_list()
+    return SkillCatalogResponse(
+        total_skills=len(skills_raw),
+        categories=sorted({item["category"] for item in skills_raw}),
+        skills=[SkillInfo(**item) for item in skills_raw],
+    )
+
+
+@app.get("/health", summary="Health check")
+def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get(
+    "/skills",
+    response_model=SkillCatalogResponse,
+    summary="List available built-in skills",
+    description=(
+        "Return the built-in skill catalog used by the ReAct agent, including "
+        "category, required arguments, optional arguments, and descriptions."
+    ),
+)
+def list_skills() -> SkillCatalogResponse:
+    return _build_skill_catalog()
 
 
 @app.post(
     "/run",
     response_model=RunResponse,
-    summary="运行 DeepResearch Agent",
+    summary="Run DeepResearch Agent",
     description=(
-        "输入研究问题，Agent 自主决策调用搜索、爬取、RAG 检索等工具，"
-        "多步推理后返回完整的 Markdown 格式研究报告及每步思考过程。"
+        "Run the ReAct research workflow and return the final report, "
+        "step trace, structured observations, and deduplicated references."
     ),
 )
 def run(req: RunRequest) -> RunResponse:
-    if not req.question.strip():
-        raise HTTPException(status_code=400, detail="question 不能为空")
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question cannot be empty")
 
     result = run_agent(
-        question=req.question.strip(),
+        question=question,
         engine=req.engine,
         max_steps=req.max_steps,
     )
+
+    observations_raw = result.get("observations", [])
+    references, references_md = _build_references(observations_raw)
 
     return RunResponse(
         answer=result.get("answer", ""),
         steps=[
             StepInfo(
-                thought=s.get("thought", ""),
-                tool=s.get("tool", ""),
-                args=s.get("args", {}),
-                observation=s.get("observation", ""),
+                thought=step.get("thought", ""),
+                tool=step.get("tool", ""),
+                args=step.get("args", {}),
+                observation=step.get("observation", ""),
+                sources=step.get("sources", []),
+                cite_ids=step.get("cite_ids", []),
+                error_type=step.get("error_type"),
             )
-            for s in result.get("steps", [])
+            for step in result.get("steps", [])
         ],
+        observations=[
+            ObservationInfo(
+                content=obs.get("content", ""),
+                sources=obs.get("sources", []),
+                tool=obs.get("tool", ""),
+                args=obs.get("args", {}),
+                cite_ids=obs.get("cite_ids", []),
+            )
+            for obs in observations_raw
+        ],
+        references=references,
+        references_md=references_md,
         step_count=result.get("step_count", 0),
         error=result.get("error"),
     )

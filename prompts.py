@@ -427,25 +427,65 @@ def prompt_aggregation_report(items_md: str, question: str, total: int) -> str:
 # ReAct Agent 系统提示
 # ══════════════════════════════════════════════
 
-def prompt_react_system(tools: dict | None = None) -> str:
-    """ReAct Agent 的系统提示，tools 为工具注册表 dict（可选，不传则用默认工具说明）"""
+def prompt_react_system(
+    tools: dict | None = None,
+    allowed_skills: list[str] | None = None,
+    starter_hint: str = "",
+) -> str:
+    """
+    ReAct Agent 的系统提示。
+
+    参数：
+        tools:           工具注册表 dict（含 desc / args / optional_args / args_desc）
+        allowed_skills:  白名单过滤。传入时只渲染这些 skill（finish 始终保留）
+        starter_hint:    起手 skill 名，写进「起手建议」段落
+    """
+    def _tool_arg_text(info: dict) -> str:
+        required = list(info.get("args", []))
+        optional = list(info.get("optional_args", []))
+        parts = []
+        if required:
+            parts.append(f"必填：{required}")
+        if optional:
+            parts.append(f"可选：{optional}")
+        return "；".join(parts) if parts else "无参数"
+
     if tools:
-        tool_lines = "\n".join(
-            f'  - "{name}": {info["desc"]}，参数：{info["args"]}'
-            for name, info in tools.items()
-        )
+        # 按白名单过滤（finish 恒保留）
+        if allowed_skills is not None:
+            allow_set = set(allowed_skills) | {"finish"}
+            effective = {k: v for k, v in tools.items() if k in allow_set}
+        else:
+            effective = tools
+
+        lines = []
+        for name, info in effective.items():
+            lines.append(f'  - "{name}": {info["desc"]} 参数：{_tool_arg_text(info)}')
+            args_desc = info.get("args_desc") or {}
+            for k, v in args_desc.items():
+                lines.append(f"      · {k}：{v}")
+        tool_lines = "\n".join(lines)
     else:
         tool_lines = (
-            '  - "search": 搜索网络，参数：["query"]\n'
-            '  - "scrape": 爬取指定 URL 的完整正文内容，参数：["url"]\n'
-            '  - "rag_retrieve": 从用户已上传的本地文档中语义检索，参数：["query"]\n'
-            '  - "finish": 信息已足够，输出最终答案，参数：["answer"]'
+            '  - "search": 搜索网络，必填：["query"]\n'
+            '  - "scrape": 爬取指定 URL 的完整正文内容，必填：["url"]\n'
+            '  - "rag_retrieve": 从用户已上传的本地文档中语义检索，必填：["query"]\n'
+            '  - "finish": 信息已足够，输出最终答案，必填：["answer"]'
         )
+
+    starter_block = ""
+    if starter_hint:
+        starter_block = (
+            f"\n## 起手建议\n"
+            f"根据问题类型预判，第一步建议优先调用 **{starter_hint}**；"
+            f"如有更合适的工具请在 thought 中说明理由再切换。\n"
+        )
+
     return f"""你是一个 ReAct（推理+行动）Agent。你的工作方式是：反复思考 → 调用工具 → 观察结果 → 再思考，直到你认为信息足够，再输出最终答案。
 
 ## 可用工具
 {tool_lines}
-
+{starter_block}
 ## 输出格式（严格遵守）
 每次只输出一个 JSON 对象，不要有任何其他内容、解释或 markdown 代码块：
 {{"thought": "你的推理过程，解释为什么选择这个工具和参数", "tool": "工具名", "args": {{"参数名": "参数值"}}}}
@@ -456,7 +496,16 @@ def prompt_react_system(tools: dict | None = None) -> str:
 ## 注意事项
 - 每次只输出一个 JSON，不要一次输出多步
 - thought 字段要真实反映你的推理逻辑
+- 只能从「可用工具」里选，不要调用未列出的工具
 - 优先搜索再爬取，不要重复搜索相同关键词
+- 当单一关键词结果噪声较大、需要换角度并行检索时，优先考虑 `search_multi`
+- 遇到“最近/最新/近一周/近一月”这类问题时，优先考虑 `search_recent`
+- 遇到“新闻/发布/公告/动态/进展”这类问题时，优先考虑 `search_news`
+- 遇到“官方文档/API/reference/guide/手册/开发者文档”时，优先考虑 `search_docs`
+- 遇到“公司官网/投资者关系/公告/财报/press release/品牌官方信息”时，优先考虑 `search_company`
+- 在目录页、首页、文档导航页上先找可跟进链接时，优先考虑 `extract_links`
+- 当手头已有多个 URL 需要统一抓取时，优先考虑 `scrape_batch`
+- 当需要沿同域页面继续深入官网、文档站或博客时，优先考虑 `scrape_deep`
 - 如果用户上传了文档，优先使用 rag_retrieve 检索本地内容
 - 最终答案（answer）要完整、结构清晰，使用 Markdown 格式"""
 
@@ -483,6 +532,209 @@ def prompt_plan_research(question: str) -> str:
 - 子问题必须足够具体，一句话就能在搜索引擎搜出有价值的结果
 - 3-5 个即可，宁少勿滥
 - 语言与用户问题一致（中文问题输出中文子问题）"""
+
+
+# ══════════════════════════════════════════════
+# 阶段 A：问题分类器 + 9 个分型报告模板
+# ══════════════════════════════════════════════
+
+def prompt_classify_question(question: str) -> str:
+    """
+    把用户问题分类到 9 种类型之一。输出单 JSON：{"type": "compare"}
+    """
+    return f"""你是一位问题类型识别专家。给定一个用户研究问题，判断它属于以下 9 种类型中的哪一种，并只输出 JSON。
+
+## 9 种类型
+- factual：单一事实问答（如"X 的 CEO 是谁"、"Y 多少钱"）
+- list：列表或 top-N（如"有哪些 X"、"top 10"、"推荐几款"收集类）
+- compare：两个或多个对象的对比（如"A 和 B 的区别"、"X 和 Y 哪个好"）
+- trend：数量/指标随时间的变化（如"近 3 年销量变化"、"X 的增长情况"）
+- timeline：事件发展的时间顺序（如"X 的发展历程"、"事件回顾"）
+- analysis：原因/机制/影响的深度分析（如"为什么 X"、"X 如何影响 Y"）
+- recommend：推荐/建议决策（如"哪款值得买"、"怎么选"、"应该用什么方案"）
+- financial：财务数据为主（营收、利润、估值、成本、现金流等）
+- research：深度综合调研（以上都不够贴切时的默认）
+
+## 用户问题
+{question}
+
+## 输出格式（只输出一个 JSON，不要有任何其他内容）
+{{"type": "上述 9 个值之一"}}"""
+
+
+def _report_common_rules(refs: str) -> str:
+    """所有分型报告共享的引用规则与格式约束。"""
+    return f"""## 引用规则（严格遵守）
+- 每条事实、数据、观点后必须标注来源编号，格式 `[数字]`（可叠加如 `[1][3]`）
+- 编号**必须**来自下方「可用引用」列表中的编号，不得编造
+- 正文中不要直接出现 URL（URL 只在末尾参考来源列出，已由系统追加，无需你写）
+- 若某条信息在观察里没有明确来源，可不标；禁止编造数据
+
+## 可用引用
+{refs}
+
+## 结尾约束
+正文结束后追加一个 `## 关键洞察` 段落，列 2-3 条跨信息点的综合判断，每条也需带 `[数字]` 引用。"""
+
+
+def prompt_report_factual(question: str, history: str, refs: str) -> str:
+    return f"""你是一位严谨的事实核查员。根据调研观察，用最简洁的方式直接回答用户问题。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- 直接回答（1-2 段，≤200 字），关键事实后带引用编号
+- 若有不同来源存在分歧，明确指出
+- 无需冗长铺垫，不要章节标题（`## 关键洞察` 除外）"""
+
+
+def prompt_report_list(question: str, history: str, refs: str) -> str:
+    return f"""你是一位信息整理专家。根据调研观察，整理出清单式答案。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- 用 Markdown 表格或编号列表呈现所有条目
+- 每条至少含 3-5 个属性（名称、关键参数、价格/评分、特点等，视问题而定）
+- 若条目数量明确（top N），严格给出 N 条
+- 每个属性值后若引自观察，需带 `[数字]`"""
+
+
+def prompt_report_compare(question: str, history: str, refs: str) -> str:
+    return f"""你是一位对比分析专家。根据调研观察，对用户关注的多个对象做系统对比。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- **必须**用 Markdown 对比表格呈现核心对比维度（维度 × 对象）
+- 表格后用 3-5 段分别阐述各维度的差异与原因，带 `[数字]` 引用
+- 最后一段给出「综合判断」（在什么场景下谁更合适）"""
+
+
+def prompt_report_trend(question: str, history: str, refs: str) -> str:
+    return f"""你是一位趋势分析专家。根据调研观察，梳理指标随时间的变化。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- **必须**先给一个 Markdown 表格（年份/阶段 × 核心指标）
+- 表后用文字描述变化特征（上升/下降/拐点/增速），每个描述带 `[数字]`
+- 简要解释变化驱动因素（1-2 段）"""
+
+
+def prompt_report_timeline(question: str, history: str, refs: str) -> str:
+    return f"""你是一位历史梳理专家。根据调研观察，按时间顺序还原事件发展脉络。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- 用 Markdown 时间线格式：`- **YYYY-MM（或阶段名）**：事件描述 [引用]`
+- 严格按时间从早到晚
+- 关键节点可加粗或单独起一段补充背景
+- 结尾简评该事件/对象的发展阶段特征"""
+
+
+def prompt_report_analysis(question: str, history: str, refs: str) -> str:
+    return f"""你是一位深度分析师。根据调研观察，对问题做原因/机制/影响层面的剖析。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- 采用「论点 → 论据 → 结论」的三段式
+- 每个核心论点独立一个 `### 小节`，论据部分必须带 `[数字]` 引用
+- 若存在多因素，使用「主因 / 次因」层次
+- 结尾给出综合结论（1 段）"""
+
+
+def prompt_report_recommend(question: str, history: str, refs: str) -> str:
+    return f"""你是一位决策顾问。根据调研观察，给出可操作的推荐或建议。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- 先 1 段概述推荐逻辑
+- 然后给出 2-5 个推荐项，每项独立小节，包含：
+  - **推荐理由**（带 `[数字]` 引用）
+  - **适用场景**
+  - **优点 / 缺点**（各 2-3 条）
+- 结尾给一条「决策建议」（在什么条件下选哪项）"""
+
+
+def prompt_report_financial(question: str, history: str, refs: str) -> str:
+    return f"""你是一位财务分析师。根据调研观察，输出严谨的财务分析报告。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- **必须**用 Markdown 表格给出关键财务数据（科目 × 期间，如季度/年度）
+- 关键指标（营收、净利润、毛利率、现金流等）用 **加粗** 强调
+- 表后分章节解读：`### 盈利能力` / `### 成长性` / `### 风险点`
+- 所有数字必须带 `[数字]` 引用，不得编造"""
+
+
+def prompt_report_research(question: str, history: str, refs: str) -> str:
+    return f"""你是一位专业的研究报告撰写专家。根据调研观察，撰写一份结构完整的综合报告。
+
+## 用户问题
+{question}
+
+## 调研观察
+{history}
+
+{_report_common_rules(refs)}
+
+## 结构要求
+- 采用章节化：`## 背景` / `## 现状` / `## 关键发现` / `## 展望`（可按主题微调）
+- 每个章节至少 1-2 段，关键事实带 `[数字]` 引用
+- 避免堆砌，提炼跨来源的共识与分歧"""
 
 
 def prompt_synthesize_report(question: str, sub_results: list[dict]) -> str:

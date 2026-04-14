@@ -13,6 +13,7 @@ from agent import (
     detect_network_mode,
 )
 from config import ENGINE_PRESETS, set_runtime_key
+from skills import BUILTIN_SKILL_REGISTRY
 from tools import (
     web_search, fetch_page_content, fetch_page_full,
     deep_scrape, save_scraped, save_report, parse_uploaded_file,
@@ -1013,6 +1014,109 @@ def render_agg_dashboard(digest: str) -> None:
     st.markdown("".join(parts), unsafe_allow_html=True)
 
 
+def _format_cite_ids(cite_ids: list[int] | None) -> str:
+    return "".join(f"[{i}]" for i in (cite_ids or []))
+
+
+def _render_observation_sources(
+    sources: list[dict] | None,
+    cite_ids: list[int] | None = None,
+) -> None:
+    cite_text = _format_cite_ids(cite_ids)
+    if cite_text:
+        st.markdown(f"**引用编号**：{cite_text}")
+
+    sources = sources or []
+    if not sources:
+        return
+
+    st.markdown("**来源**")
+    for idx, src in enumerate(sources, 1):
+        cite_prefix = ""
+        if cite_ids and idx <= len(cite_ids):
+            cite_prefix = f"[{cite_ids[idx - 1]}] "
+
+        title = src.get("title") or src.get("url") or "未命名来源"
+        url = src.get("url", "")
+        snippet = (src.get("snippet") or "").strip()
+
+        if url:
+            st.markdown(f"- {cite_prefix}[{title}]({url})")
+        else:
+            st.markdown(f"- {cite_prefix}{title}")
+
+        if snippet:
+            st.caption(snippet[:180])
+
+
+def _render_reference_registry(result: dict) -> None:
+    registry = result.get("registry")
+    refs_md = ""
+    ref_count = 0
+
+    if registry and hasattr(registry, "as_refs_md"):
+        refs_md = registry.as_refs_md()
+        if hasattr(registry, "__len__"):
+            ref_count = len(registry)
+
+    if not refs_md:
+        refs: list[str] = []
+        seen: set[str] = set()
+        for obs in result.get("observations", []) or []:
+            sources = obs.get("sources", []) or []
+            cite_ids = obs.get("cite_ids", []) or []
+            for idx, src in enumerate(sources):
+                cite_id = cite_ids[idx] if idx < len(cite_ids) else None
+                url = src.get("url", "")
+                key = f"{cite_id}:{url}" if cite_id else url
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+
+                title = src.get("title") or url or "未命名来源"
+                if cite_id and url:
+                    refs.append(f"{cite_id}. [{title}]({url})")
+                elif cite_id:
+                    refs.append(f"{cite_id}. {title}")
+                elif url:
+                    refs.append(f"- [{title}]({url})")
+                else:
+                    refs.append(f"- {title}")
+
+        ref_count = len(refs)
+        if refs:
+            refs_md = "## 参考来源\n\n" + "\n".join(refs)
+
+    if refs_md:
+        with st.expander(f"📚 参考来源（{ref_count} 个）", expanded=False):
+            st.markdown(refs_md)
+
+
+def _render_skill_catalog_sidebar() -> None:
+    category_labels = {
+        "search": "搜索",
+        "scrape": "抓取",
+        "extract": "抽取",
+        "rag": "本地 RAG",
+        "utility": "整理",
+    }
+    grouped = BUILTIN_SKILL_REGISTRY.as_grouped_metadata()
+    total = sum(len(items) for items in grouped.values())
+
+    with st.expander(f"🧰 Skills（{total}）", expanded=False):
+        st.caption("这里展示 ReAct 可调用的内置技能，不包含 `finish` 这类系统控制动作。")
+        for category, items in grouped.items():
+            st.markdown(f"**{category_labels.get(category, category.title())}（{len(items)}）**")
+            for item in items:
+                st.markdown(f"- `{item['name']}`: {item['description']}")
+                required = ", ".join(item["required_args"]) if item["required_args"] else "无"
+                optional = ", ".join(item["optional_args"]) if item["optional_args"] else "无"
+                source_flag = "是" if item["returns_sources"] else "否"
+                st.caption(
+                    f"必填：{required} ｜ 可选：{optional} ｜ 返回来源：{source_flag}"
+                )
+
+
 # ──────────────────────────────────────────────
 # 侧边栏
 # ──────────────────────────────────────────────
@@ -1089,6 +1193,9 @@ with st.sidebar:
             )
             if val and val.strip():
                 set_runtime_key(env_k, val.strip())
+
+    st.divider()
+    _render_skill_catalog_sidebar()
 
     st.divider()
 
@@ -2316,6 +2423,19 @@ elif st.session_state.mode == "agent":
                     label = f"🔬 子问题 {i}：{sr['sub_q']}"
                     with st.expander(label, expanded=False):
                         st.markdown(sr.get("answer", "（无结果）"))
+                        observations = sr.get("observations", [])
+                        if observations:
+                            st.caption(f"Collected {len(observations)} observations")
+                            for j, obs in enumerate(observations, 1):
+                                obs_label = f"Observation {j} | {obs.get('tool', '')}"
+                                with st.expander(obs_label, expanded=False):
+                                    content = obs.get("content", "")
+                                    if content:
+                                        st.text(content[:1500] + ("..." if len(content) > 1500 else ""))
+                                    _render_observation_sources(
+                                        obs.get("sources", []),
+                                        obs.get("cite_ids", []),
+                                    )
                         if sr.get("error"):
                             st.warning(f"执行出错：{sr['error'][:200]}")
 
@@ -2327,6 +2447,7 @@ elif st.session_state.mode == "agent":
 
             # 操作按钮
             st.divider()
+            _render_reference_registry(result)
             cb1, cb2, cb3 = st.columns(3)
             with cb1:
                 if st.button("💾 保存报告", use_container_width=True, type="primary",
@@ -2360,8 +2481,16 @@ elif st.session_state.mode == "agent":
                 for i, step in enumerate(steps, 1):
                     tool_icon = {
                         "search":       "🔍",
+                        "search_multi": "🔎",
+                        "search_docs":  "📚",
+                        "search_company": "🏢",
                         "search_site":  "🔍",
+                        "search_recent": "🕒",
+                        "search_news":  "📰",
                         "scrape":       "🌐",
+                        "extract_links": "🧭",
+                        "scrape_batch": "🗂️",
+                        "scrape_deep":  "🕸️",
                         "extract":      "🔎",
                         "summarize":    "📝",
                         "rag_retrieve": "📂",
@@ -2371,9 +2500,15 @@ elif st.session_state.mode == "agent":
                     with st.expander(label, expanded=False):
                         st.markdown(f"**💭 思考**\n\n{step.get('thought', '')}")
                         obs = step.get("observation", "")
+                        _render_observation_sources(
+                            step.get("sources", []),
+                            step.get("cite_ids", []),
+                        )
+                        if step.get("error_type"):
+                            st.caption(f"Error Type: {step['error_type']}")
                         if obs and obs != "(任务完成)":
                             st.markdown("**👁️ 观察结果**")
-                            st.text(obs[:1500] + ("…" if len(obs) > 1500 else ""))
+                            st.text(obs[:1500] + ("..." if len(obs) > 1500 else ""))
 
             # 最终答案
             st.divider()
@@ -2383,6 +2518,7 @@ elif st.session_state.mode == "agent":
 
             # 操作按钮
             st.divider()
+            _render_reference_registry(result)
             cb1, cb2, cb3 = st.columns(3)
             with cb1:
                 if st.button("💾 保存报告", use_container_width=True, type="primary",
