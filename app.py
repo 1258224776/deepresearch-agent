@@ -56,32 +56,33 @@ st.markdown("""
    主题 Tokens（暖色调）
 ══════════════════════════════ */
 :root {
-    --bg: #FAF8F5;
-    --bg-2: #F5F1EA;
-    --surface: #FFFFFF;
-    --surface-2: #FCF8F3;
-    --surface-muted: #F3EEE6;
-    --border: rgba(61, 50, 44, 0.10);
-    --border-strong: rgba(61, 50, 44, 0.16);
-    --border-hover: rgba(194, 87, 26, 0.40);
-    --text-primary: #3D322C;
-    --text-secondary: #6B5F56;
-    --text-muted: #978B82;
-    --text-faint: #B8ADA3;
-    --accent: #C2571A;
-    --accent-hover: #A5481A;
-    --accent-soft: rgba(194, 87, 26, 0.10);
-    --accent-softer: rgba(194, 87, 26, 0.05);
-    --accent-line: rgba(194, 87, 26, 0.28);
-    --shadow-sm: 0 2px 8px rgba(120, 76, 40, 0.06);
-    --shadow-md: 0 8px 24px rgba(120, 76, 40, 0.10);
-    --shadow-lg: 0 18px 48px rgba(120, 76, 40, 0.12);
-    --ok: #0F9268;
-    --ok-soft: rgba(15, 146, 104, 0.10);
-    --warn: #C77700;
-    --warn-soft: rgba(199, 119, 0, 0.10);
-    --danger: #C4423A;
-    --danger-soft: rgba(196, 66, 58, 0.10);
+    color-scheme: dark;
+    --bg: #080d15;
+    --bg-2: #101725;
+    --surface: rgba(18, 25, 39, 0.76);
+    --surface-2: rgba(13, 19, 31, 0.86);
+    --surface-muted: rgba(26, 35, 53, 0.82);
+    --border: rgba(148, 163, 184, 0.14);
+    --border-strong: rgba(148, 163, 184, 0.24);
+    --border-hover: rgba(125, 211, 252, 0.46);
+    --text-primary: #eef4ff;
+    --text-secondary: #bcc8dc;
+    --text-muted: #93a2bc;
+    --text-faint: #6e7d97;
+    --accent: #7dd3fc;
+    --accent-hover: #a5f3fc;
+    --accent-soft: rgba(125, 211, 252, 0.14);
+    --accent-softer: rgba(125, 211, 252, 0.08);
+    --accent-line: rgba(125, 211, 252, 0.28);
+    --shadow-sm: 0 10px 28px rgba(2, 8, 23, 0.26);
+    --shadow-md: 0 18px 44px rgba(2, 8, 23, 0.34);
+    --shadow-lg: 0 32px 80px rgba(2, 8, 23, 0.42);
+    --ok: #34d399;
+    --ok-soft: rgba(52, 211, 153, 0.14);
+    --warn: #fbbf24;
+    --warn-soft: rgba(251, 191, 36, 0.14);
+    --danger: #fb7185;
+    --danger-soft: rgba(251, 113, 133, 0.14);
 }
 
 /* ══════════════════════════════
@@ -107,13 +108,22 @@ st.markdown("""
     0%   { background-position: -200% center; }
     100% { background-position:  200% center; }
 }
+@keyframes liquidDrift {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(0, -10px, 0) scale(1.03); }
+}
+@keyframes glassGlow {
+    0%, 100% { box-shadow: 0 0 0 rgba(125, 211, 252, 0); }
+    50% { box-shadow: 0 0 32px rgba(125, 211, 252, 0.12); }
+}
 
 /* ── 背景：数字羊皮纸 + 暖阳 ── */
 .stApp {
     background: var(--bg);
     background-image:
-        radial-gradient(ellipse 60% 40% at 90% 0%, rgba(245, 158, 11, 0.10) 0%, transparent 60%),
-        radial-gradient(ellipse 50% 35% at 0% 100%, rgba(194, 87, 26, 0.06) 0%, transparent 55%);
+        radial-gradient(ellipse 56% 38% at 88% 0%, rgba(34, 211, 238, 0.16) 0%, transparent 60%),
+        radial-gradient(ellipse 42% 28% at 0% 100%, rgba(96, 165, 250, 0.12) 0%, transparent 58%),
+        radial-gradient(circle at 50% 14%, rgba(168, 85, 247, 0.10) 0%, transparent 34%);
     min-height: 100vh;
     animation: fadeIn 0.5s ease;
     color: var(--text-primary);
@@ -504,28 +514,28 @@ footer { visibility: hidden; }
    按钮覆盖
 ══════════════════════════════ */
 div[data-testid="stButton"] > button {
-    border-radius: 10px !important;
+    border-radius: 18px !important;
     font-size: 0.86rem !important;
     font-weight: 600 !important;
     letter-spacing: 0.01em !important;
-    padding: 10px 20px !important;
-    transition: all 0.2s !important;
+    padding: 10px 18px !important;
+    transition: all 0.22s ease !important;
     cursor: pointer !important;
+    backdrop-filter: blur(18px) !important;
 }
 div[data-testid="stButton"] > button[kind="primary"] {
-    background: var(--accent) !important;
-    border: 1px solid var(--accent) !important;
-    color: #fff !important;
-    box-shadow: 0 4px 14px rgba(194, 87, 26, 0.25) !important;
+    background: linear-gradient(135deg, rgba(125, 211, 252, 0.94), rgba(96, 165, 250, 0.94)) !important;
+    border: 1px solid rgba(186, 230, 253, 0.65) !important;
+    color: #06111f !important;
+    box-shadow: 0 12px 28px rgba(56, 189, 248, 0.24) !important;
 }
 div[data-testid="stButton"] > button[kind="primary"]:hover {
-    background: var(--accent-hover) !important;
-    border-color: var(--accent-hover) !important;
-    box-shadow: 0 6px 22px rgba(194, 87, 26, 0.35) !important;
-    transform: translateY(-1px) !important;
+    border-color: rgba(186, 230, 253, 0.9) !important;
+    box-shadow: 0 18px 40px rgba(56, 189, 248, 0.28) !important;
+    transform: translateY(-1px) scale(1.01) !important;
 }
 div[data-testid="stButton"] > button[kind="secondary"] {
-    background: var(--surface) !important;
+    background: rgba(255, 255, 255, 0.04) !important;
     border: 1px solid var(--border-strong) !important;
     color: var(--text-secondary) !important;
 }
@@ -537,13 +547,14 @@ div[data-testid="stButton"] > button[kind="secondary"]:hover {
 
 /* ── 输入框 ── */
 div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {
-    background: var(--surface) !important;
+    background: rgba(255, 255, 255, 0.03) !important;
     border: 1px solid var(--border-strong) !important;
-    border-radius: 10px !important;
+    border-radius: 22px !important;
     color: var(--text-primary) !important;
     font-size: 0.94rem !important;
     font-weight: 500 !important;
     caret-color: var(--accent) !important;
+    backdrop-filter: blur(18px) !important;
 }
 div[data-testid="stTextInput"] input:focus,
 div[data-testid="stTextArea"] textarea:focus {
@@ -559,8 +570,9 @@ div[data-testid="stTextArea"] textarea::placeholder {
 
 /* ── 侧边栏 ── */
 section[data-testid="stSidebar"] {
-    background: var(--surface-2) !important;
+    background: linear-gradient(180deg, rgba(10, 14, 24, 0.9), rgba(13, 18, 29, 0.82)) !important;
     border-right: 1px solid var(--border) !important;
+    backdrop-filter: blur(24px) !important;
 }
 section[data-testid="stSidebar"] * {
     color: var(--text-primary);
@@ -568,9 +580,9 @@ section[data-testid="stSidebar"] * {
 
 /* ── 文件条目 ── */
 .file-item {
-    background: var(--surface-muted);
+    background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 14px;
     padding: 7px 12px;
     margin: 4px 0;
     font-size: 0.79rem;
@@ -671,8 +683,8 @@ div[data-testid="stForm"]::before {
 
 /* ── 顶部导航优化 ── */
 .topbar-wrap {
-    background: rgba(250, 248, 245, 0.90);
-    backdrop-filter: blur(10px);
+    background: rgba(10, 15, 25, 0.62);
+    backdrop-filter: blur(22px);
     border-bottom: 1px solid var(--border);
     margin: -32px -24px 36px;
     padding: 16px 32px;
@@ -704,6 +716,14 @@ div[data-testid="stForm"]::before {
 }
 .topbar-crumb-new .sep { color: var(--text-faint); }
 .topbar-crumb-new .cur { color: var(--accent); font-weight: 600; }
+.topbar-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+}
 
 /* ── 进度条美化 ── */
 div[data-testid="stProgress"] > div {
@@ -719,20 +739,22 @@ div[data-testid="stProgress"] > div > div {
 
 /* ── chat 消息 ── */
 div[data-testid="stChatMessage"] {
-    background: var(--surface) !important;
+    background: linear-gradient(180deg, rgba(18, 25, 39, 0.74), rgba(11, 17, 28, 0.76)) !important;
     border: 1px solid var(--border) !important;
-    border-radius: 14px !important;
+    border-radius: 20px !important;
     padding: 14px 18px !important;
     margin-bottom: 10px !important;
     color: var(--text-primary) !important;
     box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(16px) !important;
+    animation: fadeUp 0.35s ease both;
 }
 
 /* ── info / warning / success 提示 ── */
 div[data-testid="stAlert"] {
-    border-radius: 12px !important;
+    border-radius: 18px !important;
     border: none !important;
-    background: var(--accent-soft) !important;
+    background: rgba(125, 211, 252, 0.08) !important;
     border-left: 3px solid var(--accent) !important;
     color: var(--text-primary) !important;
     font-size: 0.86rem !important;
@@ -758,10 +780,11 @@ div[data-testid="stMultiSelect"] > div {
 
 /* ── file uploader ── */
 div[data-testid="stFileUploader"] {
-    background: var(--surface-2) !important;
+    background: rgba(255,255,255,0.03) !important;
     border: 1.5px dashed var(--accent-line) !important;
-    border-radius: 14px !important;
+    border-radius: 20px !important;
     padding: 20px !important;
+    backdrop-filter: blur(14px) !important;
 }
 div[data-testid="stFileUploader"]:hover {
     border-color: var(--border-hover) !important;
@@ -889,6 +912,79 @@ div[data-testid="stDownloadButton"] > button:hover {
 /* ── toggle / radio 控件微调 ── */
 div[data-testid="stToggle"] label { color: var(--text-primary) !important; }
 div[data-testid="stRadio"] label { color: var(--text-primary) !important; }
+
+.workspace-empty-state {
+    position: relative;
+    padding: 92px 0 40px;
+    text-align: center;
+    max-width: 780px;
+    margin: 0 auto;
+    animation: fadeUp 0.7s ease both;
+}
+.workspace-empty-orb {
+    width: 120px;
+    height: 120px;
+    margin: 0 auto 20px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 32% 30%, rgba(255,255,255,0.42), transparent 30%),
+        linear-gradient(135deg, rgba(125,211,252,0.26), rgba(168,85,247,0.18), rgba(96,165,250,0.18));
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 24px 72px rgba(56, 189, 248, 0.12);
+    backdrop-filter: blur(20px);
+    animation: liquidDrift 7s ease-in-out infinite, glassGlow 6s ease-in-out infinite;
+}
+.workspace-empty-title {
+    font-size: clamp(2.2rem, 5vw, 3.4rem);
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.04em;
+}
+.workspace-empty-sub {
+    margin: 14px auto 0;
+    max-width: 620px;
+    color: var(--text-secondary);
+    line-height: 1.8;
+    font-size: 1rem;
+}
+.workspace-composer-anchor {
+    height: 18px;
+}
+.workspace-composer-meta {
+    margin-bottom: 10px;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+div[data-testid="stForm"] {
+    background: linear-gradient(180deg, rgba(18, 25, 39, 0.78), rgba(11, 17, 28, 0.82)) !important;
+    border: 1px solid rgba(148, 163, 184, 0.2) !important;
+    border-radius: 28px !important;
+    padding: 18px 20px !important;
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(22px);
+}
+div[data-testid="stForm"]::before {
+    background: linear-gradient(90deg, transparent, rgba(125,211,252,0.8), rgba(168,85,247,0.5), transparent);
+}
+div[data-testid="stForm"] div[data-testid="stTextInput"] input {
+    min-height: 56px !important;
+    border-radius: 999px !important;
+    background: rgba(255,255,255,0.02) !important;
+    border-color: rgba(255,255,255,0.08) !important;
+}
+div[data-testid="stForm"] div[data-testid="stTextArea"] textarea {
+    border-radius: 20px !important;
+    min-height: 112px !important;
+}
+
+@media (max-width: 820px) {
+    .block-container { padding-left: 1rem !important; padding-right: 1rem !important; }
+    .topbar-wrap {
+        margin-left: -16px;
+        margin-right: -16px;
+        padding: 14px 18px;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -917,8 +1013,8 @@ _defaults = {
     "ue_items":      [],          # 打工 AI 提取的结构化条目
     "ue_dashboard":  "",          # 看板 AI 生成的 Dashboard JSON
     "ue_log":        [],          # 流水线推理日志
-    "scrape_source_type": "全网综合",
-    "scrape_time_range":  "不限",
+    "scrape_source_type": "web",
+    "scrape_time_range":  "any",
     "scrape_report":      "",    # 按需生成的综合报告（不再自动触发）
     "route_mode":         "manual",
     "workspace_panel":    "chat",
@@ -928,13 +1024,14 @@ _defaults = {
     "workspace_context_title": "",
     "workspace_threads": [],
     "workspace_active_thread_id": "",
-    "workspace_research_mode": "材料探索",
+    "workspace_research_mode": "materials",
     "workspace_extract_urls": "",
     "workspace_extract_intent": "",
     "workspace_agent_steps": 8,
     "workspace_agent_profile": DEFAULT_SKILL_PROFILE,
     "workspace_prompt": "",
     "workspace_single_model": "",
+    "workspace_lang": "zh",
 }
 for k, v in _defaults.items():
     if k not in st.session_state:
@@ -943,32 +1040,252 @@ for k, v in _defaults.items():
 os.makedirs("reports", exist_ok=True)
 os.makedirs("scraped",  exist_ok=True)
 
-RELEVANCE_LABEL = {"high": "高相关", "medium": "中相关", "low": "低相关"}
-RELEVANCE_DOT   = {"high": "🟢", "medium": "🟡", "low": "⚪"}
+WORKSPACE_LANG_PACK = {
+    "zh": {
+        "new_thread": "\u65b0\u5bf9\u8bdd",
+        "empty_thread": "\u7b49\u5f85\u4f60\u7684\u7b2c\u4e00\u6761\u6d88\u606f",
+        "sidebar_caption": "\u6301\u7eed\u4f1a\u8bdd\u5de5\u4f5c\u53f0\u3002\u5de6\u4fa7\u8d1f\u8d23\u6a21\u5f0f\u3001\u5386\u53f2\u548c\u8d44\u6599\uff0c\u4e3b\u533a\u4e13\u6ce8\u5f53\u524d\u5bf9\u8bdd\u3002",
+        "language": "\u754c\u9762\u8bed\u8a00",
+        "lang_zh": "\u4e2d\u6587",
+        "lang_en": "English",
+        "mode_chat": "\u5bf9\u8bdd",
+        "mode_research": "\u8bfe\u9898\u7814\u7a76",
+        "mode_extract": "\u7f51\u9875\u63d0\u53d6",
+        "new_chat": "\u65b0\u5efa\u5bf9\u8bdd",
+        "home": "\u8fd4\u56de\u4e3b\u9875",
+        "modes": "\u6a21\u5f0f",
+        "workspace_mode": "\u5de5\u4f5c\u6a21\u5f0f",
+        "advanced": "\u9ad8\u7ea7\u9009\u9879",
+        "current_context": "\u5f53\u524d\u4e0a\u4e0b\u6587",
+        "save_report": "\u4fdd\u5b58\u4e3a\u62a5\u544a",
+        "saved_path": "\u5df2\u4fdd\u5b58\uff1a{path}",
+        "history": "\u5386\u53f2\u5bf9\u8bdd",
+        "current_thread_label": "\u5f53\u524d - {title}",
+        "api_keys": "API Key \u7ba1\u7406",
+        "api_keys_caption": "\u8fd9\u91cc\u53ea\u4fdd\u5b58\u5f53\u524d\u8fd0\u884c\u65f6\u7684 Key\uff0c\u4e0d\u4f1a\u5199\u5165\u4ed3\u5e93\u6587\u4ef6\u3002",
+        "local_files": "\u672c\u5730\u6587\u6863",
+        "local_files_caption": "\u8fd9\u4e9b\u6587\u4ef6\u4f1a\u8fdb\u5165\u5f53\u524d\u4f1a\u8bdd\u7684\u68c0\u7d22\u4e0a\u4e0b\u6587\u3002",
+        "no_local_files": "\u8fd8\u6ca1\u6709\u4e0a\u4f20\u6587\u4ef6\u3002",
+        "recent_files": "\u6700\u8fd1\u6587\u4ef6",
+        "no_recent_files": "\u6682\u65e0\u6587\u4ef6",
+        "ask_with_skills": "\u76f4\u63a5\u63d0\u95ee\u5373\u53ef\uff0c\u7cfb\u7edf\u4f1a\u6309\u9700\u8981\u81ea\u52a8\u8c03\u7528 skills\u3002",
+        "research_hint": "\u9002\u5408\u505a\u8d44\u6599\u641c\u96c6\u3001\u6df1\u5ea6\u7814\u7a76\u548c\u591a\u6b65 Agent \u8c03\u67e5\u3002",
+        "extract_hint": "\u8f93\u5165 URL \u548c\u76ee\u6807\u540e\uff0c\u7cfb\u7edf\u4f1a\u6279\u91cf\u63d0\u53d6\u5e76\u6574\u7406\u7f51\u9875\u5185\u5bb9\u3002",
+        "workspace_title": "DeepResearch \u5de5\u4f5c\u53f0",
+        "workspace_subtitle": "\u5728\u4e00\u6761\u6301\u7eed\u4f1a\u8bdd\u91cc\u5b8c\u6210\u5bf9\u8bdd\u3001\u7814\u7a76\u548c\u7f51\u9875\u63d0\u53d6\u3002<br>\u5148\u8f93\u5165\u95ee\u9898\uff0c\u5269\u4e0b\u7684\u6a21\u5f0f\u5207\u6362\u548c\u9ad8\u7ea7\u9009\u9879\u90fd\u653e\u5728\u4fa7\u8fb9\u680f\u3002",
+        "current_thread": "{mode} \u00b7 \u5f53\u524d\u4f1a\u8bdd\uff1a{title}",
+        "page_urls": "\u7f51\u9875 URL",
+        "extract_goal": "\u63d0\u53d6\u76ee\u6807",
+        "extract_placeholder": "\u4f8b\u5982\uff1a\u63d0\u53d6\u4ea7\u54c1\u529f\u80fd\u3001\u4ef7\u683c\u3001\u53d1\u5e03\u65f6\u95f4\u548c\u5f15\u7528\u94fe\u63a5",
+        "chat_placeholder": "\u7ee7\u7eed\u63d0\u95ee\u3001\u8865\u5145\u8981\u6c42\uff0c\u6216\u8005\u8ba9\u7cfb\u7edf\u57fa\u4e8e\u5df2\u6709\u4e0a\u4e0b\u6587\u7ee7\u7eed\u63a8\u8fdb...",
+        "research_placeholder": "\u4f8b\u5982\uff1a\u6bd4\u8f83 OpenAI \u548c Anthropic \u5728\u5f00\u53d1\u8005 API \u4e0a\u7684\u6700\u65b0\u53d8\u5316",
+        "prompt": "\u8f93\u5165\u5185\u5bb9",
+        "upload": "\u4e0a\u4f20\u6587\u4ef6",
+        "upload_types": "\u652f\u6301 PDF / DOCX / TXT / CSV / MD",
+        "upload_added": "\u5df2\u65b0\u589e {count} \u4efd\u6587\u4ef6\u3002",
+        "upload_loaded": "\u5f53\u524d\u4f1a\u8bdd\u5df2\u8f7d\u5165 {count} \u4efd\u6587\u4ef6\u3002",
+        "upload_help": "\u4e0a\u4f20\u540e\u7684\u6750\u6599\u4f1a\u8fdb\u5165\u672c\u5730\u77e5\u8bc6\u5e93\uff0c\u540e\u7eed\u7814\u7a76\u548c\u5bf9\u8bdd\u90fd\u53ef\u4ee5\u76f4\u63a5\u5f15\u7528\u3002",
+        "send": "\u53d1\u9001",
+        "start_research": "\u5f00\u59cb\u7814\u7a76",
+        "start_extract": "\u5f00\u59cb\u63d0\u53d6",
+        "need_url_and_goal": "\u8bf7\u81f3\u5c11\u586b\u5199\u4e00\u4e2a URL\uff0c\u5e76\u8bf4\u660e\u4f60\u60f3\u63d0\u53d6\u4ec0\u4e48\u3002",
+        "extract_user": "\u63d0\u53d6 {count} \u4e2a\u7f51\u9875\uff1a{intent}",
+        "extracting": "\u6b63\u5728\u63d0\u53d6\u7f51\u9875\u5185\u5bb9...",
+        "extract_summary": "\u5df2\u5b8c\u6210\u7f51\u9875\u63d0\u53d6\uff0c\u5171\u5904\u7406 {count} \u4e2a URL\uff0c\u8f93\u51fa {items} \u6761\u7ed3\u6784\u5316\u7ed3\u679c\u3002",
+        "extract_context": "\u7f51\u9875\u63d0\u53d6\uff1a{intent}",
+        "need_prompt": "\u8bf7\u8f93\u5165\u5185\u5bb9\u3002",
+        "thinking": "\u6b63\u5728\u601d\u8003...",
+        "collecting_sources": "\u6b63\u5728\u6574\u7406\u7814\u7a76\u8d44\u6599...",
+        "research_summary": "\u5df2\u5b8c\u6210\u521d\u6b65\u7814\u7a76\uff0c\u5171\u6574\u7406 {count} \u6761\u6765\u6e90\u3002",
+        "research_context": "\u7814\u7a76\u4e0a\u4e0b\u6587\uff1a{question}",
+        "planner_spinner": "\u6b63\u5728\u8fdb\u884c\u6df1\u5ea6\u89c4\u5212...",
+        "react_spinner": "\u6b63\u5728\u6267\u884c ReAct \u7814\u7a76...",
+        "no_answer": "\u672a\u83b7\u5f97\u53ef\u7528\u56de\u7b54\u3002",
+        "model_select": "\u9009\u62e9\u6a21\u578b",
+        "model_current": "\u5f53\u524d\u6a21\u578b",
+        "model_help": "Skills \u4f1a\u81ea\u52a8\u8c03\u7528\uff1b\u8fd9\u91cc\u5207\u6362\u7684\u662f\u5f53\u524d\u4f1a\u8bdd\u4f7f\u7528\u7684\u6a21\u578b\u3002",
+        "research_mode_label": "\u7814\u7a76\u65b9\u5f0f",
+        "research_mode_materials": "\u6750\u6599\u63a2\u7d22",
+        "research_mode_react": "ReAct \u81ea\u4e3b",
+        "research_mode_planner": "\u6df1\u5ea6\u89c4\u5212",
+        "source_type_label": "\u6765\u6e90\u7c7b\u578b",
+        "source_type_web": "\u5168\u7f51\u7efc\u5408",
+        "source_type_news": "\u65b0\u95fb\u8d44\u8baf\uff08\u65f6\u6548\u4f18\u5148\uff09",
+        "source_type_docs": "\u6280\u672f\u6587\u6863\uff08\u6df1\u5ea6\u4f18\u5148\uff09",
+        "source_type_academic": "\u5b66\u672f / \u8bba\u6587",
+        "time_range_label": "\u65f6\u95f4\u8303\u56f4",
+        "time_any": "\u4e0d\u9650",
+        "time_day": "\u6700\u8fd1 24 \u5c0f\u65f6",
+        "time_week": "\u6700\u8fd1\u4e00\u5468",
+        "time_month": "\u6700\u8fd1\u4e00\u6708",
+        "time_year": "\u6700\u8fd1\u4e00\u5e74",
+        "chat_system_lang": "\u8bf7\u9ed8\u8ba4\u4f7f\u7528\u7b80\u4f53\u4e2d\u6587\u56de\u7b54\uff0c\u9664\u975e\u7528\u6237\u660e\u786e\u8981\u6c42\u5176\u4ed6\u8bed\u8a00\u3002",
+        "chat_context_title": "\u5f53\u524d\u5de5\u4f5c\u53f0\u4e0a\u4e0b\u6587",
+        "chat_history_user": "\u7528\u6237",
+        "chat_history_assistant": "\u52a9\u624b"
+    },
+    "en": {
+        "new_thread": "New chat",
+        "empty_thread": "Waiting for the first message",
+        "sidebar_caption": "Conversation-first workspace. Use the sidebar for modes, history, and local materials.",
+        "language": "Language",
+        "lang_zh": "\u4e2d\u6587",
+        "lang_en": "English",
+        "mode_chat": "Chat",
+        "mode_research": "Research",
+        "mode_extract": "Extract",
+        "new_chat": "New chat",
+        "home": "Home",
+        "modes": "Modes",
+        "workspace_mode": "Workspace mode",
+        "advanced": "Advanced",
+        "current_context": "Current context",
+        "save_report": "Save report",
+        "saved_path": "Saved: {path}",
+        "history": "History",
+        "current_thread_label": "Current - {title}",
+        "api_keys": "API keys",
+        "api_keys_caption": "Runtime only. Keys entered here are not written back into the repository.",
+        "local_files": "Local files",
+        "local_files_caption": "These documents are available to the current conversation.",
+        "no_local_files": "No local files yet.",
+        "recent_files": "Recent files",
+        "no_recent_files": "No files yet",
+        "ask_with_skills": "Ask directly and the app will call skills only when needed.",
+        "research_hint": "Use this for source gathering, deeper analysis, or multi-step agent work.",
+        "extract_hint": "Give one or more URLs and explain what information should be extracted.",
+        "workspace_title": "DeepResearch Workspace",
+        "workspace_subtitle": "Keep chat, research, and web extraction inside one continuous thread.<br>Start from the composer below. Modes and advanced controls stay in the sidebar.",
+        "current_thread": "{mode} \u00b7 Current thread: {title}",
+        "page_urls": "Page URLs",
+        "extract_goal": "Extraction goal",
+        "extract_placeholder": "Example: extract product features, pricing, dates, and source links",
+        "chat_placeholder": "Continue the conversation, refine the task, or ask the app to build on the current context...",
+        "research_placeholder": "Example: compare the latest developer API changes from OpenAI and Anthropic",
+        "prompt": "Prompt",
+        "upload": "Upload files",
+        "upload_types": "PDF / DOCX / TXT / CSV / MD",
+        "upload_added": "Added {count} file(s).",
+        "upload_loaded": "{count} file(s) are loaded in this conversation.",
+        "upload_help": "Uploaded files go into the local knowledge context and can be cited in later turns.",
+        "send": "Send",
+        "start_research": "Start research",
+        "start_extract": "Extract",
+        "need_url_and_goal": "Please add at least one URL and describe what should be extracted.",
+        "extract_user": "Extract from {count} page(s): {intent}",
+        "extracting": "Extracting web content...",
+        "extract_summary": "Extraction finished. Processed {count} URL(s) and produced {items} structured result(s).",
+        "extract_context": "Extract: {intent}",
+        "need_prompt": "Please enter a prompt.",
+        "thinking": "Thinking...",
+        "collecting_sources": "Collecting sources...",
+        "research_summary": "Research finished with {count} source(s).",
+        "research_context": "Research: {question}",
+        "planner_spinner": "Planning and researching...",
+        "react_spinner": "Running ReAct research...",
+        "no_answer": "No usable answer was produced.",
+        "model_select": "Select model",
+        "model_current": "Current model",
+        "model_help": "Skills are still called automatically. This only changes the model for the current conversation.",
+        "research_mode_label": "Research mode",
+        "research_mode_materials": "Material scan",
+        "research_mode_react": "ReAct agent",
+        "research_mode_planner": "Deep planner",
+        "source_type_label": "Source type",
+        "source_type_web": "Web mix",
+        "source_type_news": "News first",
+        "source_type_docs": "Docs first",
+        "source_type_academic": "Academic",
+        "time_range_label": "Time range",
+        "time_any": "Any time",
+        "time_day": "Last 24 hours",
+        "time_week": "Last week",
+        "time_month": "Last month",
+        "time_year": "Last year",
+        "chat_system_lang": "Default to English unless the user clearly asks for another language.",
+        "chat_context_title": "Current workspace context",
+        "chat_history_user": "User",
+        "chat_history_assistant": "Assistant"
+    }
+}
+
+WORKSPACE_RESEARCH_MODES = ["materials", "react", "planner"]
+WORKSPACE_SOURCE_TYPES = ["web", "news", "docs", "academic"]
+WORKSPACE_TIME_RANGES = ["any", "day", "week", "month", "year"]
+
+def _workspace_lang() -> str:
+    lang = st.session_state.get("workspace_lang", "zh")
+    return lang if lang in WORKSPACE_LANG_PACK else "zh"
+
+def _wt(key: str, **kwargs) -> str:
+    text = WORKSPACE_LANG_PACK[_workspace_lang()].get(key, key)
+    return text.format(**kwargs) if kwargs else text
+
+def _workspace_panel_labels() -> dict[str, str]:
+    return {
+        "chat": _wt("mode_chat"),
+        "research": _wt("mode_research"),
+        "extract": _wt("mode_extract"),
+    }
+
+def _research_mode_label(value: str) -> str:
+    return {
+        "materials": _wt("research_mode_materials"),
+        "react": _wt("research_mode_react"),
+        "planner": _wt("research_mode_planner"),
+    }.get(value, value)
+
+def _source_type_label(value: str) -> str:
+    return {
+        "web": _wt("source_type_web"),
+        "news": _wt("source_type_news"),
+        "docs": _wt("source_type_docs"),
+        "academic": _wt("source_type_academic"),
+    }.get(value, value)
+
+def _time_range_label(value: str) -> str:
+    return {
+        "any": _wt("time_any"),
+        "day": _wt("time_day"),
+        "week": _wt("time_week"),
+        "month": _wt("time_month"),
+        "year": _wt("time_year"),
+    }.get(value, value)
+
+def _relevance_label(value: str) -> str:
+    return {
+        "high": {"zh": "\u9ad8\u76f8\u5173", "en": "High relevance"},
+        "medium": {"zh": "\u4e2d\u76f8\u5173", "en": "Medium relevance"},
+        "low": {"zh": "\u4f4e\u76f8\u5173", "en": "Low relevance"},
+    }.get(value, {}).get(_workspace_lang(), "")
+
+RELEVANCE_DOT   = {"high": "??", "medium": "??", "low": "?"}
 
 def go_home():
+    keep_lang = st.session_state.get("workspace_lang", "zh")
     for k, v in _defaults.items():
         st.session_state[k] = v
+    st.session_state.workspace_lang = keep_lang
 
 
 WORKSPACE_CHAT_SYSTEM_PROMPT = (
-    "你是 DeepResearch 工作台助手。你需要在持续会话里帮助用户完成普通问答、"
-    "内容探索、网页提取和后续追问。回答要简洁、直接，并优先利用当前工作台上下文。"
+    "You are the DeepResearch workspace assistant. Help the user continue a live thread across chat, research, extraction, "
+    "and follow-up questions. Keep answers concise, practical, and grounded in the current workspace context."
 )
 
 WORKSPACE_SOURCE_HINTS = {
-    "全网综合": "",
-    "新闻资讯（时效优先）": " 请优先关注最近的新闻、公告、动态与媒体报道。",
-    "技术文档（深度优先）": " 请优先查找官方文档、API reference、guide、SDK 文档。",
-    "学术/论文": " 请优先关注论文、研究综述、学术机构资料。",
+    "web": "",
+    "news": " Please prioritize recent news, announcements, updates, and media coverage.",
+    "docs": " Please prioritize official docs, API references, guides, and SDK documentation.",
+    "academic": " Please prioritize papers, literature reviews, and academic institution sources.",
 }
 
 WORKSPACE_TIME_MAP = {
-    "不限": "",
-    "最近24小时": "d",
-    "最近一周": "w",
-    "最近一月": "m",
-    "最近一年": "y",
+    "any": "",
+    "day": "d",
+    "week": "w",
+    "month": "m",
+    "year": "y",
 }
 
 
@@ -1012,7 +1329,7 @@ def _workspace_thread_title(messages: list[dict]) -> str:
             text = str(msg.get("content", "")).strip().replace("\n", " ")
             if text:
                 return text[:28] + ("..." if len(text) > 28 else "")
-    return "新对话"
+    return _wt("new_thread")
 
 
 def _workspace_thread_preview(messages: list[dict]) -> str:
@@ -1020,14 +1337,14 @@ def _workspace_thread_preview(messages: list[dict]) -> str:
         text = str(msg.get("content", "")).strip().replace("\n", " ")
         if text:
             return text[:42] + ("..." if len(text) > 42 else "")
-    return "等待你的第一条消息"
+    return _wt("empty_thread")
 
 
 def _workspace_blank_thread(thread_id: str | None = None) -> dict:
     return {
         "id": thread_id or f"thread-{len(st.session_state.get('workspace_threads', [])) + 1}-{os.urandom(2).hex()}",
-        "title": "新对话",
-        "preview": "等待你的第一条消息",
+        "title": _wt("new_thread"),
+        "preview": _wt("empty_thread"),
         "panel": "chat",
         "messages": [],
         "chat_history": [],
@@ -1137,7 +1454,7 @@ def _workspace_chat_context(limit: int = 8) -> str:
     history = st.session_state.get("workspace_chat_history", [])[-limit:]
     lines: list[str] = []
     for item in history:
-        role = "用户" if item.get("role") == "user" else "助手"
+        role = _wt("chat_history_user") if item.get("role") == "user" else _wt("chat_history_assistant")
         content = str(item.get("content", "")).strip()
         if content:
             lines.append(f"{role}: {content}")
@@ -1147,21 +1464,22 @@ def _workspace_chat_context(limit: int = 8) -> str:
 def _workspace_answer_chat(user_msg: str) -> str:
     engine = st.session_state.get("ue_engine", "")
     context_report = st.session_state.get("workspace_context_report", "")
-    context_title = st.session_state.get("workspace_context_title", "当前工作台上下文")
+    context_title = st.session_state.get("workspace_context_title", _wt("chat_context_title"))
     chat_history = st.session_state.get("workspace_chat_history", [])
     if context_report:
         return chat_with_report(context_title, context_report, chat_history, user_msg)
 
     history_ctx = _workspace_chat_context()
-    prompt = f"""你正在 DeepResearch 的工作台中与用户持续对话。
+    prompt = f"""You are continuing a live DeepResearch workspace conversation.
 
-最近对话：
-{history_ctx or "（暂无）"}
+Recent conversation:
+{history_ctx or "(empty)"}
 
-用户最新消息：
+Latest user message:
 {user_msg}
 
-请基于当前上下文直接回答。如果问题需要进一步研究，也先明确告诉用户下一步建议。"""
+{_wt("chat_system_lang")}
+Answer directly based on the current context. If the question needs more research, say what should happen next."""
     return ai_generate_role(
         prompt,
         system=WORKSPACE_CHAT_SYSTEM_PROMPT or SYSTEM_PROMPT,
@@ -1175,11 +1493,11 @@ def _render_workspace_sources(sources: list[dict]) -> None:
         return
 
     for idx, src in enumerate(sources, 1):
-        title = src.get("title") or src.get("url") or f"来源 {idx}"
+        title = src.get("title") or src.get("url") or (f"来源 {idx}" if _workspace_lang() == "zh" else f"Source {idx}")
         url = src.get("url", "")
         snippet = (src.get("snippet") or "").strip()
         relevance = src.get("relevance", "")
-        badge = RELEVANCE_LABEL.get(relevance, "")
+        badge = _relevance_label(relevance)
 
         if url:
             st.markdown(f"{idx}. [{title}]({url})")
@@ -1197,7 +1515,7 @@ def _render_workspace_sources(sources: list[dict]) -> None:
 
 def _render_workspace_extract_items(items: list[dict]) -> None:
     if not items:
-        st.caption("没有提取到结构化条目。")
+        st.caption("没有提取到结构化条目。" if _workspace_lang() == "zh" else "No structured items were extracted.")
         return
 
     import pandas as pd
@@ -1212,7 +1530,7 @@ def _render_workspace_extract_items(items: list[dict]) -> None:
     df = pd.DataFrame([{k: _norm(item.get(k)) for k in display_keys} for item in items])
     column_config = {}
     if "url" in display_keys:
-        column_config["url"] = st.column_config.LinkColumn("链接", display_text="打开")
+        column_config["url"] = st.column_config.LinkColumn("链接" if _workspace_lang() == "zh" else "Link", display_text="打开" if _workspace_lang() == "zh" else "Open")
     st.dataframe(df, use_container_width=True, height=320, column_config=column_config)
 
 
@@ -1222,16 +1540,17 @@ def _render_workspace_message(msg: dict, index: int) -> None:
     content = msg.get("content", "")
     data = msg.get("data", {}) or {}
     avatar = "🧑" if role == "user" else "🤖"
+    lang = _workspace_lang()
 
     with st.chat_message(role, avatar=avatar):
         if role == "user":
             label_map = {
-                "chat": "普通对话",
-                "research": "内容探索",
-                "extract": "网页提取",
-                "agent": "Agent 探索",
+                "chat": _wt("mode_chat"),
+                "research": _wt("mode_research"),
+                "extract": _wt("mode_extract"),
+                "agent": "Agent",
             }
-            st.caption(label_map.get(kind, "工作台消息"))
+            st.caption(label_map.get(kind, "Workspace"))
             st.markdown(content)
             return
 
@@ -1240,35 +1559,38 @@ def _render_workspace_message(msg: dict, index: int) -> None:
             return
 
         if kind == "research":
-            st.caption(f"内容探索结果 · {data.get('mode', '材料探索')}")
+            st.caption(f"{_wt('mode_research')} · {_research_mode_label(data.get('mode', 'materials'))}")
             if content:
                 st.markdown(content)
             if data.get("reasoning_log"):
-                with st.expander("过程记录", expanded=False):
+                with st.expander("过程记录" if lang == "zh" else "Run log", expanded=False):
                     for line in data.get("reasoning_log", []):
                         st.markdown(f"- {line}")
             if data.get("sources"):
-                with st.expander(f"材料清单（{len(data.get('sources', []))}）", expanded=False):
+                with st.expander(
+                    f"{'材料清单' if lang == 'zh' else 'Sources'}（{len(data.get('sources', []))}）",
+                    expanded=False,
+                ):
                     _render_workspace_sources(data.get("sources", []))
             if data.get("task_mode") == "aggregation" and data.get("digest"):
-                with st.expander("结构化看板", expanded=True):
+                with st.expander("结构化看板" if lang == "zh" else "Structured dashboard", expanded=True):
                     render_agg_dashboard(data.get("digest", ""))
             return
 
         if kind == "extract":
             st.caption(
-                f"网页提取结果 · {data.get('url_count', 0)} 个 URL · "
-                f"{len(data.get('items', []) or [])} 条记录"
+                f"{_wt('mode_extract')} · {data.get('url_count', 0)} URL · "
+                f"{len(data.get('items', []) or [])} {'条记录' if lang == 'zh' else 'items'}"
             )
             if content:
                 st.markdown(content)
             dashboard = data.get("dashboard", "")
             if dashboard:
                 render_agg_dashboard(dashboard)
-            with st.expander("结构化数据", expanded=False):
+            with st.expander("结构化数据" if lang == "zh" else "Structured data", expanded=False):
                 _render_workspace_extract_items(data.get("items", []))
             if data.get("log"):
-                with st.expander("流水线记录", expanded=False):
+                with st.expander("流水线记录" if lang == "zh" else "Pipeline log", expanded=False):
                     for line in data.get("log", []):
                         st.markdown(f"- {line}")
             return
@@ -1276,13 +1598,13 @@ def _render_workspace_message(msg: dict, index: int) -> None:
         if kind == "agent":
             result = data.get("result", {}) or {}
             is_planner = bool(data.get("is_planner"))
-            st.caption("深度规划" if is_planner else "ReAct 自主")
+            st.caption(_research_mode_label("planner" if is_planner else "react"))
             if content:
                 st.markdown(content)
             if is_planner:
                 plan = result.get("plan", {}) or {}
                 if plan:
-                    with st.expander("研究规划", expanded=False):
+                    with st.expander("研究规划" if lang == "zh" else "Research plan", expanded=False):
                         reasoning = plan.get("reasoning", "")
                         if reasoning:
                             st.caption(reasoning)
@@ -1290,7 +1612,10 @@ def _render_workspace_message(msg: dict, index: int) -> None:
                             st.markdown(f"{idx}. {sq}")
                 sub_results = result.get("sub_results", []) or []
                 if sub_results:
-                    with st.expander(f"子问题结果（{len(sub_results)}）", expanded=False):
+                    with st.expander(
+                        f"{'子问题结果' if lang == 'zh' else 'Sub-results'}（{len(sub_results)}）",
+                        expanded=False,
+                    ):
                         for idx, sub in enumerate(sub_results, 1):
                             st.markdown(f"**{idx}. {sub.get('sub_q', '')}**")
                             st.markdown(sub.get("answer", ""))
@@ -1298,7 +1623,7 @@ def _render_workspace_message(msg: dict, index: int) -> None:
                 _render_route_debug(result.get("route", {}), data.get("skill_profile", DEFAULT_SKILL_PROFILE))
                 steps = result.get("steps", []) or []
                 if steps:
-                    with st.expander(f"推理步骤（{len(steps)}）", expanded=False):
+                    with st.expander(f"{'推理步骤' if lang == 'zh' else 'Reasoning steps'}（{len(steps)}）", expanded=False):
                         for idx, step in enumerate(steps, 1):
                             label = _format_step_label(
                                 step.get("tool", ""),
@@ -1318,7 +1643,7 @@ def _render_workspace_message(msg: dict, index: int) -> None:
             _render_reference_registry(result)
             return
 
-        st.markdown(content or "（无内容）")
+        st.markdown(content or ("（无内容）" if lang == "zh" else "(empty)"))
 
 
 def _apply_single_model_routing(provider: str) -> None:
@@ -1348,7 +1673,7 @@ def _render_workspace_model_controls() -> None:
     current = _current_workspace_model()
     if current:
         _apply_single_model_routing(current)
-    label = f"模型 · {_provider_display_name(current)}" if current else "选择模型"
+    label = f"{_provider_display_name(current)} ▾" if current else _wt("model_select")
     popover = getattr(st, "popover", None)
     if callable(popover):
         popover_ctx = popover(label, use_container_width=True)
@@ -1356,7 +1681,7 @@ def _render_workspace_model_controls() -> None:
         popover_ctx = st.expander(label, expanded=False)
     with popover_ctx:
         chosen = st.selectbox(
-            "当前模型",
+            _wt("model_current"),
             options=provider_names,
             index=provider_names.index(current) if current in provider_names else 0,
             key="workspace_single_model_selector",
@@ -1365,18 +1690,18 @@ def _render_workspace_model_controls() -> None:
         if chosen != current:
             _apply_single_model_routing(chosen)
             st.rerun()
-        st.caption("Skills 会自动调用；这里只切换当前会话使用的模型。")
+        st.caption(_wt("model_help"))
 
 
 def _render_workspace_upload_control() -> None:
     popover = getattr(st, "popover", None)
     if callable(popover):
-        upload_ctx = popover("Upload files", use_container_width=True)
+        upload_ctx = popover("＋", use_container_width=True)
     else:
-        upload_ctx = st.expander("Upload files", expanded=False)
+        upload_ctx = st.expander(_wt("upload"), expanded=False)
     with upload_ctx:
         uploaded = st.file_uploader(
-            "PDF / DOCX / TXT / CSV / MD",
+            _wt("upload_types"),
             type=["pdf", "docx", "txt", "csv", "md"],
             accept_multiple_files=True,
             key="workspace_inline_upload",
@@ -1384,34 +1709,43 @@ def _render_workspace_upload_control() -> None:
         )
         added = _workspace_ingest_uploaded_docs(uploaded)
         if added:
-            st.success(f"Added {added} file(s).")
+            st.success(_wt("upload_added", count=added))
         if st.session_state.local_docs:
-            st.caption(f"{len(st.session_state.local_docs)} file(s) are loaded in this conversation.")
+            st.caption(_wt("upload_loaded", count=len(st.session_state.local_docs)))
         else:
-            st.caption("Uploaded files go into the local knowledge context and can be cited in later turns.")
+            st.caption(_wt("upload_help"))
 
 
 def _render_workspace_advanced_controls(panel: str) -> None:
     if panel == "research":
+        if st.session_state.get("workspace_research_mode") not in WORKSPACE_RESEARCH_MODES:
+            st.session_state.workspace_research_mode = "materials"
+        if st.session_state.get("scrape_source_type") not in WORKSPACE_SOURCE_TYPES:
+            st.session_state.scrape_source_type = "web"
+        if st.session_state.get("scrape_time_range") not in WORKSPACE_TIME_RANGES:
+            st.session_state.scrape_time_range = "any"
         research_mode = st.radio(
-            "研究方式",
-            ["材料探索", "ReAct 自主", "深度规划"],
+            _wt("research_mode_label"),
+            WORKSPACE_RESEARCH_MODES,
             key="workspace_research_mode",
+            format_func=_research_mode_label,
             horizontal=True,
         )
 
-        if research_mode == "材料探索":
+        if research_mode == "materials":
             st.selectbox(
-                "来源类型",
-                ["全网综合", "新闻资讯（时效优先）", "技术文档（深度优先）", "学术/论文"],
+                _wt("source_type_label"),
+                WORKSPACE_SOURCE_TYPES,
                 key="scrape_source_type",
+                format_func=_source_type_label,
             )
             st.selectbox(
-                "时间范围",
-                ["不限", "最近24小时", "最近一周", "最近一月", "最近一年"],
+                _wt("time_range_label"),
+                WORKSPACE_TIME_RANGES,
                 key="scrape_time_range",
+                format_func=_time_range_label,
             )
-        elif research_mode == "ReAct 自主":
+        elif research_mode == "react":
             st.selectbox(
                 "Skill Profile",
                 options=[DEFAULT_SKILL_PROFILE, "web_research_heavy"],
@@ -1431,11 +1765,11 @@ def _render_workspace_advanced_controls(panel: str) -> None:
                 key="workspace_agent_steps",
             )
         else:
-            st.caption("深度规划会先拆分子问题，再分别研究后综合。")
+            st.caption("Planner will break the topic into sub-questions and synthesize the results.")
     elif panel == "extract":
-        st.caption("网页提取模式会根据你的 URL 和目标自动执行提取。")
+        st.caption(_wt("extract_hint"))
     else:
-        st.caption("对话模式默认最简。")
+        st.caption(_wt("ask_with_skills"))
 
 
 def render_agg_dashboard(digest: str) -> None:
@@ -1751,7 +2085,7 @@ def _provider_display_name(name: str) -> str:
     cfg = PROVIDERS.get(name, {})
     model = cfg.get("model", "")
     key_ready = bool(load_secret(cfg.get("env", ""))) if cfg.get("env") else False
-    status = "已配 Key" if key_ready else "未配 Key"
+    status = ("已配 Key" if key_ready else "未配 Key") if _workspace_lang() == "zh" else ("Key ready" if key_ready else "Missing key")
     model_part = f" · {model}" if model else ""
     return f"{name}{model_part} · {status}"
 
@@ -1843,59 +2177,65 @@ def _render_skill_catalog_sidebar() -> None:
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.markdown("#### DeepResearch")
-    st.caption("Conversation-first workspace. Use the sidebar for modes, history, and local materials.")
+    lang_cols = st.columns(2)
+    with lang_cols[0]:
+        if st.button(_wt("lang_zh"), use_container_width=True, type="primary" if _workspace_lang() == "zh" else "secondary", key="workspace_lang_zh"):
+            st.session_state.workspace_lang = "zh"
+            st.rerun()
+    with lang_cols[1]:
+        if st.button(_wt("lang_en"), use_container_width=True, type="primary" if _workspace_lang() == "en" else "secondary", key="workspace_lang_en"):
+            st.session_state.workspace_lang = "en"
+            st.rerun()
+    st.caption(_wt("sidebar_caption"))
+
     if st.session_state.mode == "workspace":
         _workspace_ensure_active_thread()
         _workspace_sync_active_thread()
-        panel_labels = {
-            "chat": "Chat",
-            "research": "Research",
-            "extract": "Extract",
-        }
+        panel_labels = _workspace_panel_labels()
         panel_options = list(panel_labels.keys())
         if st.session_state.get("workspace_panel") not in panel_options:
             st.session_state.workspace_panel = panel_options[0]
 
         side_action_cols = st.columns(2)
         with side_action_cols[0]:
-            if st.button("New chat", use_container_width=True, key="sidebar_workspace_reset"):
+            if st.button(_wt("new_chat"), use_container_width=True, key="sidebar_workspace_reset"):
                 _workspace_create_thread()
                 st.rerun()
         with side_action_cols[1]:
-            if st.button("Home", use_container_width=True, key="sidebar_workspace_home"):
+            if st.button(_wt("home"), use_container_width=True, key="sidebar_workspace_home"):
                 st.session_state.mode = "home"
                 st.rerun()
 
         st.divider()
-        st.markdown("**Modes**")
+        st.markdown(f"**{_wt('modes')}**")
         st.radio(
-            "Workspace mode",
+            _wt("workspace_mode"),
             panel_options,
             key="workspace_panel",
             format_func=panel_labels.get,
             label_visibility="collapsed",
         )
-        with st.expander("Advanced", expanded=st.session_state.get("workspace_panel") != "chat"):
+        with st.expander(_wt("advanced"), expanded=st.session_state.get("workspace_panel") != "chat"):
             _render_workspace_advanced_controls(st.session_state.get("workspace_panel", "chat"))
 
         if st.session_state.get("workspace_context_report"):
-            with st.expander("Current context", expanded=False):
+            with st.expander(_wt("current_context"), expanded=False):
                 st.caption(st.session_state.get("workspace_context_title", ""))
-                if st.button("Save report", use_container_width=True, key="sidebar_workspace_save_context"):
+                if st.button(_wt("save_report"), use_container_width=True, key="sidebar_workspace_save_context"):
                     fp = save_report(
-                        st.session_state.get("workspace_context_title", "Current context"),
+                        st.session_state.get("workspace_context_title", _wt("current_context")),
                         st.session_state.get("workspace_context_report", ""),
                     )
-                    st.success(f"Saved: {fp}")
+                    st.success(_wt("saved_path", path=fp))
 
         st.divider()
-        st.markdown("**History**")
+        st.markdown(f"**{_wt('history')}**")
         for thread in st.session_state.get("workspace_threads", []):
             thread_id = thread.get("id", "")
-            title = thread.get("title", "Untitled chat")
+            title = thread.get("title", _wt("new_thread"))
             preview = thread.get("preview", "")
             active = thread_id == st.session_state.get("workspace_active_thread_id", "")
-            label = f"Current - {title}" if active else title
+            label = _wt("current_thread_label", title=title) if active else title
             if st.button(label, use_container_width=True, key=f"workspace_thread_{thread_id}"):
                 _workspace_activate_thread(thread_id)
                 st.rerun()
@@ -1903,8 +2243,8 @@ with st.sidebar:
                 st.caption(preview)
 
     st.divider()
-    with st.expander("API keys", expanded=False):
-        st.caption("Runtime only. Keys entered here are not written back into the repository.")
+    with st.expander(_wt("api_keys"), expanded=False):
+        st.caption(_wt("api_keys_caption"))
         _key_fields = [
             ("GOOGLE_API_KEY", "Google / Gemini"),
             ("ANTHROPIC_API_KEY", "Anthropic / Claude"),
@@ -1926,8 +2266,8 @@ with st.sidebar:
     _render_skill_catalog_sidebar()
 
     st.divider()
-    st.markdown("**Local files**")
-    st.caption("These documents are available to the current conversation.")
+    st.markdown(f"**{_wt('local_files')}**")
+    st.caption(_wt("local_files_caption"))
     if st.session_state.local_docs:
         for doc in st.session_state.local_docs:
             c1, c2 = st.columns([4, 1])
@@ -1943,10 +2283,10 @@ with st.sidebar:
                         pass
                     st.rerun()
     else:
-        st.caption("No local files yet.")
+        st.caption(_wt("no_local_files"))
 
     st.divider()
-    st.markdown("**Recent files**")
+    st.markdown(f"**{_wt('recent_files')}**")
     reports = sorted([f for f in os.listdir("reports") if f.endswith(".md")], reverse=True)[:4]
     scraped_files = sorted([f for f in os.listdir("scraped") if f.endswith(".md")], reverse=True)[:4]
     for f in reports:
@@ -1954,25 +2294,21 @@ with st.sidebar:
     for f in scraped_files:
         st.markdown(f'<div class="file-item">WEB {f}</div>', unsafe_allow_html=True)
     if not reports and not scraped_files:
-        st.markdown('<div class="file-item">No files yet</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="file-item">{_wt("no_recent_files")}</div>', unsafe_allow_html=True)
 
 
 if st.session_state.mode == "workspace":
     _workspace_ensure_active_thread()
     _workspace_sync_active_thread()
     workspace_panel = st.session_state.get("workspace_panel", "chat")
-    panel_labels = {
-        "chat": "Chat",
-        "research": "Research",
-        "extract": "Extract",
-    }
+    panel_labels = _workspace_panel_labels()
     active_id = st.session_state.get("workspace_active_thread_id", "")
     active_thread = next((thread for thread in st.session_state.get("workspace_threads", []) if thread.get("id") == active_id), None)
-    active_title = (active_thread or {}).get("title") or "Untitled chat"
+    active_title = (active_thread or {}).get("title") or _wt("new_thread")
     panel_hint = {
-        "chat": "Ask directly and the app will call skills only when needed.",
-        "research": "Use this for source gathering, deeper analysis, or multi-step agent work.",
-        "extract": "Give one or more URLs and explain what information should be extracted.",
+        "chat": _wt("ask_with_skills"),
+        "research": _wt("research_hint"),
+        "extract": _wt("extract_hint"),
     }.get(workspace_panel, "")
     submit_clicked = False
     composer_value = ""
@@ -1981,9 +2317,9 @@ if st.session_state.mode == "workspace":
 <div class="topbar-wrap">
   <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
   <div class="topbar-crumb-new">
-    {panel_labels.get(workspace_panel, 'Chat')}<span class="sep">/</span> <span class="cur">{active_title}</span>
+    {panel_labels.get(workspace_panel, _wt('mode_chat'))}<span class="sep">/</span> <span class="cur">{active_title}</span>
   </div>
-  <div></div>
+  <div class="topbar-meta">{_wt('lang_zh') if _workspace_lang() == 'zh' else 'EN'}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1995,64 +2331,58 @@ if st.session_state.mode == "workspace":
             _render_workspace_message(msg, idx)
     else:
         st.markdown(
-            """
-<div style="padding:72px 0 28px;text-align:center;max-width:780px;margin:0 auto;">
-  <div style="font-size:2.8rem;font-weight:800;color:var(--text-primary);letter-spacing:-0.03em;">DeepResearch Workspace</div>
-  <div style="margin-top:12px;font-size:1.02rem;line-height:1.7;color:var(--text-secondary);">
-    Keep chat, research, and web extraction inside one continuous thread.<br>
-    Start from the composer below. Modes and advanced controls stay in the sidebar.
-  </div>
+            f"""
+<div class="workspace-empty-state">
+  <div class="workspace-empty-orb"></div>
+  <div class="workspace-empty-title">{_wt('workspace_title')}</div>
+  <div class="workspace-empty-sub">{_wt('workspace_subtitle')}</div>
 </div>
 """,
             unsafe_allow_html=True,
         )
 
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-    with st.container(border=True):
-        st.caption(f"{panel_labels.get(workspace_panel, 'Chat')} - Current thread: {active_title}")
+    st.markdown("<div class='workspace-composer-anchor'></div>", unsafe_allow_html=True)
+    with st.form("workspace_composer", clear_on_submit=False):
+        st.markdown(f"<div class='workspace-composer-meta'>{_wt('current_thread', mode=panel_labels.get(workspace_panel, _wt('mode_chat')), title=active_title)}</div>", unsafe_allow_html=True)
+
         if workspace_panel == "extract":
-            url_col, intent_col = st.columns([1.15, 1.0], gap="large")
-            with url_col:
-                st.text_area(
-                    "Page URLs",
-                    key="workspace_extract_urls",
-                    height=132,
-                    placeholder="https://example.com/page1\nhttps://example.com/page2",
-                )
-            with intent_col:
-                st.text_area(
-                    "Extraction goal",
-                    key="workspace_extract_intent",
-                    height=132,
-                    placeholder="Example: extract product features, pricing, dates, and source links",
-                )
-        else:
-            prompt_placeholder = (
-                "Continue the conversation, refine the task, or ask the app to build on the current context..."
-                if workspace_panel == "chat"
-                else "Example: compare the latest developer API changes from OpenAI and Anthropic"
+            st.text_area(
+                _wt("page_urls"),
+                key="workspace_extract_urls",
+                height=116,
+                placeholder="https://example.com/page1\\nhttps://example.com/page2",
             )
             st.text_area(
-                "Prompt",
-                key="workspace_prompt",
-                height=118,
-                placeholder=prompt_placeholder,
-                label_visibility="collapsed",
+                _wt("extract_goal"),
+                key="workspace_extract_intent",
+                height=116,
+                placeholder=_wt("extract_placeholder"),
             )
-            composer_value = st.session_state.get("workspace_prompt", "").strip()
-
-        composer_actions = st.columns([1.0, 1.0, 0.72], gap="small")
-        with composer_actions[0]:
-            _render_workspace_model_controls()
-        with composer_actions[1]:
-            _render_workspace_upload_control()
-        with composer_actions[2]:
-            action_label = {
-                "chat": "Send",
-                "research": "Start research",
-                "extract": "Extract",
-            }.get(workspace_panel, "Send")
-            submit_clicked = st.button(action_label, use_container_width=True, type="primary")
+            extract_action_cols = st.columns([0.9, 1.15, 0.85], gap="small")
+            with extract_action_cols[0]:
+                _render_workspace_upload_control()
+            with extract_action_cols[1]:
+                _render_workspace_model_controls()
+            with extract_action_cols[2]:
+                submit_clicked = st.form_submit_button(_wt("start_extract"), use_container_width=True, type="primary")
+        else:
+            composer_cols = st.columns([0.42, 4.8, 1.12, 0.9], gap="small")
+            with composer_cols[0]:
+                _render_workspace_upload_control()
+            with composer_cols[1]:
+                prompt_placeholder = _wt("chat_placeholder") if workspace_panel == "chat" else _wt("research_placeholder")
+                st.text_input(
+                    _wt("prompt"),
+                    key="workspace_prompt",
+                    placeholder=prompt_placeholder,
+                    label_visibility="collapsed",
+                )
+                composer_value = st.session_state.get("workspace_prompt", "").strip()
+            with composer_cols[2]:
+                _render_workspace_model_controls()
+            with composer_cols[3]:
+                action_label = _wt("send") if workspace_panel == "chat" else _wt("start_research")
+                submit_clicked = st.form_submit_button(action_label, use_container_width=True, type="primary")
 
     if submit_clicked:
         panel = st.session_state.get("workspace_panel", "chat")
@@ -2065,21 +2395,18 @@ if st.session_state.mode == "workspace":
             ]
             intent = st.session_state.get("workspace_extract_intent", "").strip()
             if not urls or not intent:
-                st.warning("Please add at least one URL and describe what should be extracted.")
+                st.warning(_wt("need_url_and_goal"))
             else:
-                user_text = f"Extract from {len(urls)} page(s): {intent}"
+                user_text = _wt("extract_user", count=len(urls), intent=intent)
                 _workspace_append_message("user", "extract", user_text, {"urls": urls})
                 _workspace_note_chat("user", user_text)
-                with st.spinner("Extracting web content..."):
+                with st.spinner(_wt("extracting")):
                     schema, items, dashboard_json, log = run_url_pipeline(
                         urls,
                         intent,
                         engine=engine,
                     )
-                summary = (
-                    f"Extraction finished. Processed {len(urls)} URL(s) and produced "
-                    f"{len(items)} structured result(s)."
-                )
+                summary = _wt("extract_summary", count=len(urls), items=len(items))
                 _workspace_append_message(
                     "assistant",
                     "extract",
@@ -2094,45 +2421,47 @@ if st.session_state.mode == "workspace":
                     },
                 )
                 _workspace_note_chat("assistant", summary)
-                _workspace_set_context(f"Extract: {intent}", dashboard_json or summary)
+                _workspace_set_context(_wt("extract_context", intent=intent), dashboard_json or summary)
                 st.session_state.workspace_extract_urls = ""
                 st.session_state.workspace_extract_intent = ""
                 st.rerun()
-        elif not composer_value:
-            st.warning("Please enter a prompt.")
+        elif not st.session_state.get("workspace_prompt", "").strip():
+            st.warning(_wt("need_prompt"))
         elif panel == "chat":
+            composer_value = st.session_state.get("workspace_prompt", "").strip()
             _workspace_append_message("user", "chat", composer_value)
             _workspace_note_chat("user", composer_value)
-            with st.spinner("Thinking..."):
+            with st.spinner(_wt("thinking")):
                 answer = _workspace_answer_chat(composer_value)
             _workspace_append_message("assistant", "chat", answer)
             _workspace_note_chat("assistant", answer)
             st.session_state.workspace_prompt = ""
             st.rerun()
         elif panel == "research":
-            research_mode = st.session_state.get("workspace_research_mode", "材料探索")
-            if research_mode == "材料探索":
-                source_type = st.session_state.get("scrape_source_type", "全网综合")
-                time_range = st.session_state.get("scrape_time_range", "不限")
+            composer_value = st.session_state.get("workspace_prompt", "").strip()
+            research_mode = st.session_state.get("workspace_research_mode", "materials")
+            if research_mode == "materials":
+                source_type = st.session_state.get("scrape_source_type", "web")
+                time_range = st.session_state.get("scrape_time_range", "any")
                 hint = WORKSPACE_SOURCE_HINTS.get(source_type, "")
                 timelimit = WORKSPACE_TIME_MAP.get(time_range, "")
-                task_question = composer_value.strip() + hint
+                task_question = composer_value + hint
                 _workspace_append_message("user", "research", composer_value, {"mode": research_mode})
                 _workspace_note_chat("user", composer_value)
-                with st.spinner("Collecting sources..."):
+                with st.spinner(_wt("collecting_sources")):
                     sources, digest, reasoning_log, task_mode = run_research(
                         task_question,
                         timelimit=timelimit,
                     )
-                summary = digest or compile_digest(sources, composer_value.strip())
-                summary = summary or f"Research finished with {len(sources)} source(s)."
+                summary = digest or compile_digest(sources, composer_value)
+                summary = summary or _wt("research_summary", count=len(sources))
                 _workspace_append_message(
                     "assistant",
                     "research",
                     summary,
                     {
                         "mode": research_mode,
-                        "question": composer_value.strip(),
+                        "question": composer_value,
                         "sources": sources,
                         "digest": summary,
                         "reasoning_log": reasoning_log,
@@ -2140,21 +2469,21 @@ if st.session_state.mode == "workspace":
                     },
                 )
                 _workspace_note_chat("assistant", summary)
-                _workspace_set_context(f"Research: {composer_value.strip()}", summary)
+                _workspace_set_context(_wt("research_context", question=composer_value), summary)
                 st.session_state.workspace_prompt = ""
                 st.rerun()
 
             _workspace_append_message("user", "agent", composer_value, {"mode": research_mode})
             _workspace_note_chat("user", composer_value)
-            if research_mode == "深度规划":
+            if research_mode == "planner":
                 from agent_planner import run_planner_agent
 
-                with st.spinner("Planning and researching..."):
+                with st.spinner(_wt("planner_spinner")):
                     result = run_planner_agent(
-                        question=composer_value.strip(),
+                        question=composer_value,
                         engine=engine,
                     )
-                answer = result.get("answer", "") or "No usable answer was produced."
+                answer = result.get("answer", "") or _wt("no_answer")
                 _workspace_append_message(
                     "assistant",
                     "agent",
@@ -2166,7 +2495,7 @@ if st.session_state.mode == "workspace":
                     },
                 )
                 _workspace_note_chat("assistant", answer)
-                _workspace_set_context(f"Research: {composer_value.strip()}", answer)
+                _workspace_set_context(_wt("research_context", question=composer_value), answer)
                 st.session_state.workspace_prompt = ""
                 st.rerun()
 
@@ -2174,14 +2503,14 @@ if st.session_state.mode == "workspace":
 
             selected_profile = st.session_state.get("workspace_agent_profile", DEFAULT_SKILL_PROFILE)
             max_steps = int(st.session_state.get("workspace_agent_steps", 8))
-            with st.spinner("Running ReAct research..."):
+            with st.spinner(_wt("react_spinner")):
                 result = run_agent(
-                    question=composer_value.strip(),
+                    question=composer_value,
                     engine=engine,
                     max_steps=max_steps,
                     skill_profile=selected_profile,
                 )
-            answer = result.get("answer", "") or "No usable answer was produced."
+            answer = result.get("answer", "") or _wt("no_answer")
             _workspace_append_message(
                 "assistant",
                 "agent",
@@ -2193,7 +2522,7 @@ if st.session_state.mode == "workspace":
                 },
             )
             _workspace_note_chat("assistant", answer)
-            _workspace_set_context(f"Research: {composer_value.strip()}", answer)
+            _workspace_set_context(_wt("research_context", question=composer_value), answer)
             st.session_state.workspace_prompt = ""
             st.rerun()
 
@@ -2533,8 +2862,10 @@ elif st.session_state.mode == "scrape":
 """, unsafe_allow_html=True)
 
         high_cnt = sum(1 for s in sources if s.get("relevance") == "high")
-        _src_type = st.session_state.get("scrape_source_type", "全网综合")
-        _time_rng = st.session_state.get("scrape_time_range", "不限")
+        _src_key = st.session_state.get("scrape_source_type", "web")
+        _time_key = st.session_state.get("scrape_time_range", "any")
+        _src_type = _source_type_label(_src_key) if _src_key in WORKSPACE_SOURCE_TYPES else _src_key
+        _time_rng = _time_range_label(_time_key) if _time_key in WORKSPACE_TIME_RANGES else _time_key
         st.markdown(f"""
 <div class="stat-bar">
   <div class="stat-chip">📚 来源 <span class="val">{len(sources)}</span></div>
@@ -2624,7 +2955,7 @@ elif st.session_state.mode == "scrape":
       style="color:inherit;text-decoration:none;border-bottom:1px solid rgba(255,255,255,0.2)">{src['title']}</a></div>
   </div>
   <div class="src-meta">
-    <span class="badge badge-{rel}">{RELEVANCE_DOT[rel]} {RELEVANCE_LABEL[rel]}</span>
+    <span class="badge badge-{rel}">{RELEVANCE_DOT[rel]} {_relevance_label(rel)}</span>
     <span class="badge badge-domain">🌐 {src['domain']}</span>
   </div>
   <div class="src-summary">{src['summary']}</div>
