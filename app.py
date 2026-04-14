@@ -1371,12 +1371,12 @@ def _render_workspace_model_controls() -> None:
 def _render_workspace_upload_control() -> None:
     popover = getattr(st, "popover", None)
     if callable(popover):
-        upload_ctx = popover("涓婁紶鏂囦欢", use_container_width=True)
+        upload_ctx = popover("Upload files", use_container_width=True)
     else:
-        upload_ctx = st.expander("涓婁紶鏂囦欢", expanded=False)
+        upload_ctx = st.expander("Upload files", expanded=False)
     with upload_ctx:
         uploaded = st.file_uploader(
-            "鏀寔 PDF / DOCX / TXT / CSV / MD",
+            "PDF / DOCX / TXT / CSV / MD",
             type=["pdf", "docx", "txt", "csv", "md"],
             accept_multiple_files=True,
             key="workspace_inline_upload",
@@ -1384,11 +1384,11 @@ def _render_workspace_upload_control() -> None:
         )
         added = _workspace_ingest_uploaded_docs(uploaded)
         if added:
-            st.success(f"宸插姞鍏?{added} 涓枃妗ｃ€?")
+            st.success(f"Added {added} file(s).")
         if st.session_state.local_docs:
-            st.caption(f"褰撳墠宸插姞杞?{len(st.session_state.local_docs)} 涓枃妗ｃ€?")
+            st.caption(f"{len(st.session_state.local_docs)} file(s) are loaded in this conversation.")
         else:
-            st.caption("鍦ㄨ繖閲屼笂浼犳枃妗ｅ悗锛屽璇濆拰鐮旂┒浼氳嚜鍔ㄥ埄鐢ㄨ繖浜涙潗鏂欍€?")
+            st.caption("Uploaded files go into the local knowledge context and can be cited in later turns.")
 
 
 def _render_workspace_advanced_controls(panel: str) -> None:
@@ -1843,14 +1843,14 @@ def _render_skill_catalog_sidebar() -> None:
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.markdown("#### DeepResearch")
-    st.caption("??????????????????")
+    st.caption("Conversation-first workspace. Use the sidebar for modes, history, and local materials.")
     if st.session_state.mode == "workspace":
         _workspace_ensure_active_thread()
         _workspace_sync_active_thread()
         panel_labels = {
-            "chat": "??",
-            "research": "????",
-            "extract": "????",
+            "chat": "Chat",
+            "research": "Research",
+            "extract": "Extract",
         }
         panel_options = list(panel_labels.keys())
         if st.session_state.get("workspace_panel") not in panel_options:
@@ -1858,44 +1858,44 @@ with st.sidebar:
 
         side_action_cols = st.columns(2)
         with side_action_cols[0]:
-            if st.button("????", use_container_width=True, key="sidebar_workspace_reset"):
+            if st.button("New chat", use_container_width=True, key="sidebar_workspace_reset"):
                 _workspace_create_thread()
                 st.rerun()
         with side_action_cols[1]:
-            if st.button("????", use_container_width=True, key="sidebar_workspace_home"):
+            if st.button("Home", use_container_width=True, key="sidebar_workspace_home"):
                 st.session_state.mode = "home"
                 st.rerun()
 
         st.divider()
-        st.markdown("**????**")
+        st.markdown("**Modes**")
         st.radio(
-            "????",
+            "Workspace mode",
             panel_options,
             key="workspace_panel",
             format_func=panel_labels.get,
             label_visibility="collapsed",
         )
-        with st.expander("????", expanded=st.session_state.get("workspace_panel") != "chat"):
+        with st.expander("Advanced", expanded=st.session_state.get("workspace_panel") != "chat"):
             _render_workspace_advanced_controls(st.session_state.get("workspace_panel", "chat"))
 
         if st.session_state.get("workspace_context_report"):
-            with st.expander("?????", expanded=False):
+            with st.expander("Current context", expanded=False):
                 st.caption(st.session_state.get("workspace_context_title", ""))
-                if st.button("??????", use_container_width=True, key="sidebar_workspace_save_context"):
+                if st.button("Save report", use_container_width=True, key="sidebar_workspace_save_context"):
                     fp = save_report(
-                        st.session_state.get("workspace_context_title", "?????"),
+                        st.session_state.get("workspace_context_title", "Current context"),
                         st.session_state.get("workspace_context_report", ""),
                     )
-                    st.success(f"????{fp}")
+                    st.success(f"Saved: {fp}")
 
         st.divider()
-        st.markdown("**????**")
+        st.markdown("**History**")
         for thread in st.session_state.get("workspace_threads", []):
             thread_id = thread.get("id", "")
-            title = thread.get("title", "????")
+            title = thread.get("title", "Untitled chat")
             preview = thread.get("preview", "")
             active = thread_id == st.session_state.get("workspace_active_thread_id", "")
-            label = f"? {title}" if active else title
+            label = f"Current - {title}" if active else title
             if st.button(label, use_container_width=True, key=f"workspace_thread_{thread_id}"):
                 _workspace_activate_thread(thread_id)
                 st.rerun()
@@ -1903,8 +1903,8 @@ with st.sidebar:
                 st.caption(preview)
 
     st.divider()
-    with st.expander("API Key ??", expanded=False):
-        st.caption("????????? Key???????????????????????")
+    with st.expander("API keys", expanded=False):
+        st.caption("Runtime only. Keys entered here are not written back into the repository.")
         _key_fields = [
             ("GOOGLE_API_KEY", "Google / Gemini"),
             ("ANTHROPIC_API_KEY", "Anthropic / Claude"),
@@ -1926,8 +1926,8 @@ with st.sidebar:
     _render_skill_catalog_sidebar()
 
     st.divider()
-    st.markdown("**?????**")
-    st.caption("???????????????")
+    st.markdown("**Local files**")
+    st.caption("These documents are available to the current conversation.")
     if st.session_state.local_docs:
         for doc in st.session_state.local_docs:
             c1, c2 = st.columns([4, 1])
@@ -1943,10 +1943,10 @@ with st.sidebar:
                         pass
                     st.rerun()
     else:
-        st.caption("???????")
+        st.caption("No local files yet.")
 
     st.divider()
-    st.markdown("**?????**")
+    st.markdown("**Recent files**")
     reports = sorted([f for f in os.listdir("reports") if f.endswith(".md")], reverse=True)[:4]
     scraped_files = sorted([f for f in os.listdir("scraped") if f.endswith(".md")], reverse=True)[:4]
     for f in reports:
@@ -1954,7 +1954,7 @@ with st.sidebar:
     for f in scraped_files:
         st.markdown(f'<div class="file-item">WEB {f}</div>', unsafe_allow_html=True)
     if not reports and not scraped_files:
-        st.markdown('<div class="file-item">????</div>', unsafe_allow_html=True)
+        st.markdown('<div class="file-item">No files yet</div>', unsafe_allow_html=True)
 
 
 if st.session_state.mode == "workspace":
@@ -1962,26 +1962,26 @@ if st.session_state.mode == "workspace":
     _workspace_sync_active_thread()
     workspace_panel = st.session_state.get("workspace_panel", "chat")
     panel_labels = {
-        "chat": "??",
-        "research": "????",
-        "extract": "????",
+        "chat": "Chat",
+        "research": "Research",
+        "extract": "Extract",
     }
     active_id = st.session_state.get("workspace_active_thread_id", "")
     active_thread = next((thread for thread in st.session_state.get("workspace_threads", []) if thread.get("id") == active_id), None)
-    active_title = (active_thread or {}).get("title") or "????"
+    active_title = (active_thread or {}).get("title") or "Untitled chat"
     panel_hint = {
-        "chat": "???????skills ??????????",
-        "research": "??????????????????????????",
-        "extract": "?? URL ???????????",
+        "chat": "Ask directly and the app will call skills only when needed.",
+        "research": "Use this for source gathering, deeper analysis, or multi-step agent work.",
+        "extract": "Give one or more URLs and explain what information should be extracted.",
     }.get(workspace_panel, "")
-    extract_clicked = False
+    submit_clicked = False
     composer_value = ""
 
     st.markdown(f"""
 <div class="topbar-wrap">
   <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
   <div class="topbar-crumb-new">
-    {panel_labels.get(workspace_panel, '??')}<span class="sep">/</span> <span class="cur">{active_title}</span>
+    {panel_labels.get(workspace_panel, 'Chat')}<span class="sep">/</span> <span class="cur">{active_title}</span>
   </div>
   <div></div>
 </div>
@@ -1997,10 +1997,10 @@ if st.session_state.mode == "workspace":
         st.markdown(
             """
 <div style="padding:72px 0 28px;text-align:center;max-width:780px;margin:0 auto;">
-  <div style="font-size:2.8rem;font-weight:800;color:var(--text-primary);letter-spacing:-0.03em;">DeepResearch</div>
+  <div style="font-size:2.8rem;font-weight:800;color:var(--text-primary);letter-spacing:-0.03em;">DeepResearch Workspace</div>
   <div style="margin-top:12px;font-size:1.02rem;line-height:1.7;color:var(--text-secondary);">
-    ???????????????????????????<br>
-    ?????????????????????????
+    Keep chat, research, and web extraction inside one continuous thread.<br>
+    Start from the composer below. Modes and advanced controls stay in the sidebar.
   </div>
 </div>
 """,
@@ -2009,31 +2009,31 @@ if st.session_state.mode == "workspace":
 
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     with st.container(border=True):
-        st.caption(f"{panel_labels.get(workspace_panel, '??')} ? ?????{active_title}")
+        st.caption(f"{panel_labels.get(workspace_panel, 'Chat')} - Current thread: {active_title}")
         if workspace_panel == "extract":
             url_col, intent_col = st.columns([1.15, 1.0], gap="large")
             with url_col:
                 st.text_area(
-                    "?? URL",
+                    "Page URLs",
                     key="workspace_extract_urls",
                     height=132,
-                    placeholder="https://example.com/page1\\nhttps://example.com/page2",
+                    placeholder="https://example.com/page1\nhttps://example.com/page2",
                 )
             with intent_col:
                 st.text_area(
-                    "????",
+                    "Extraction goal",
                     key="workspace_extract_intent",
                     height=132,
-                    placeholder="????????????????????",
+                    placeholder="Example: extract product features, pricing, dates, and source links",
                 )
         else:
             prompt_placeholder = (
-                "???????????????????..."
+                "Continue the conversation, refine the task, or ask the app to build on the current context..."
                 if workspace_panel == "chat"
-                else "??????????????? OpenAI ? Anthropic ? API ??"
+                else "Example: compare the latest developer API changes from OpenAI and Anthropic"
             )
             st.text_area(
-                "???",
+                "Prompt",
                 key="workspace_prompt",
                 height=118,
                 placeholder=prompt_placeholder,
@@ -2048,13 +2048,13 @@ if st.session_state.mode == "workspace":
             _render_workspace_upload_control()
         with composer_actions[2]:
             action_label = {
-                "chat": "??",
-                "research": "????",
-                "extract": "????",
-            }.get(workspace_panel, "??")
-            extract_clicked = st.button(action_label, use_container_width=True, type="primary")
+                "chat": "Send",
+                "research": "Start research",
+                "extract": "Extract",
+            }.get(workspace_panel, "Send")
+            submit_clicked = st.button(action_label, use_container_width=True, type="primary")
 
-    if extract_clicked:
+    if submit_clicked:
         panel = st.session_state.get("workspace_panel", "chat")
         engine = st.session_state.get("ue_engine", "")
         if panel == "extract":
@@ -2065,20 +2065,20 @@ if st.session_state.mode == "workspace":
             ]
             intent = st.session_state.get("workspace_extract_intent", "").strip()
             if not urls or not intent:
-                st.warning("?????????? URL ????????")
+                st.warning("Please add at least one URL and describe what should be extracted.")
             else:
-                user_text = f"?? {len(urls)} ???????{intent}"
+                user_text = f"Extract from {len(urls)} page(s): {intent}"
                 _workspace_append_message("user", "extract", user_text, {"urls": urls})
                 _workspace_note_chat("user", user_text)
-                with st.spinner("????????..."):
+                with st.spinner("Extracting web content..."):
                     schema, items, dashboard_json, log = run_url_pipeline(
                         urls,
                         intent,
                         engine=engine,
                     )
                 summary = (
-                    f"??????????? {len(urls)} ? URL?"
-                    f"??? {len(items)} ???????"
+                    f"Extraction finished. Processed {len(urls)} URL(s) and produced "
+                    f"{len(items)} structured result(s)."
                 )
                 _workspace_append_message(
                     "assistant",
@@ -2094,38 +2094,38 @@ if st.session_state.mode == "workspace":
                     },
                 )
                 _workspace_note_chat("assistant", summary)
-                _workspace_set_context(f"?????{intent}", dashboard_json or summary)
+                _workspace_set_context(f"Extract: {intent}", dashboard_json or summary)
                 st.session_state.workspace_extract_urls = ""
                 st.session_state.workspace_extract_intent = ""
                 st.rerun()
         elif not composer_value:
-            st.warning("???????")
+            st.warning("Please enter a prompt.")
         elif panel == "chat":
             _workspace_append_message("user", "chat", composer_value)
             _workspace_note_chat("user", composer_value)
-            with st.spinner("????..."):
+            with st.spinner("Thinking..."):
                 answer = _workspace_answer_chat(composer_value)
             _workspace_append_message("assistant", "chat", answer)
             _workspace_note_chat("assistant", answer)
             st.session_state.workspace_prompt = ""
             st.rerun()
         elif panel == "research":
-            research_mode = st.session_state.get("workspace_research_mode", "????")
-            if research_mode == "????":
-                source_type = st.session_state.get("scrape_source_type", "????")
-                time_range = st.session_state.get("scrape_time_range", "??")
+            research_mode = st.session_state.get("workspace_research_mode", "材料探索")
+            if research_mode == "材料探索":
+                source_type = st.session_state.get("scrape_source_type", "全网综合")
+                time_range = st.session_state.get("scrape_time_range", "不限")
                 hint = WORKSPACE_SOURCE_HINTS.get(source_type, "")
                 timelimit = WORKSPACE_TIME_MAP.get(time_range, "")
                 task_question = composer_value.strip() + hint
                 _workspace_append_message("user", "research", composer_value, {"mode": research_mode})
                 _workspace_note_chat("user", composer_value)
-                with st.spinner("?????????..."):
+                with st.spinner("Collecting sources..."):
                     sources, digest, reasoning_log, task_mode = run_research(
                         task_question,
                         timelimit=timelimit,
                     )
                 summary = digest or compile_digest(sources, composer_value.strip())
-                summary = summary or f"??????????? {len(sources)} ????"
+                summary = summary or f"Research finished with {len(sources)} source(s)."
                 _workspace_append_message(
                     "assistant",
                     "research",
@@ -2140,21 +2140,21 @@ if st.session_state.mode == "workspace":
                     },
                 )
                 _workspace_note_chat("assistant", summary)
-                _workspace_set_context(f"?????{composer_value.strip()}", summary)
+                _workspace_set_context(f"Research: {composer_value.strip()}", summary)
                 st.session_state.workspace_prompt = ""
                 st.rerun()
 
             _workspace_append_message("user", "agent", composer_value, {"mode": research_mode})
             _workspace_note_chat("user", composer_value)
-            if research_mode == "????":
+            if research_mode == "深度规划":
                 from agent_planner import run_planner_agent
 
-                with st.spinner("????????..."):
+                with st.spinner("Planning and researching..."):
                     result = run_planner_agent(
                         question=composer_value.strip(),
                         engine=engine,
                     )
-                answer = result.get("answer", "") or "???????????????"
+                answer = result.get("answer", "") or "No usable answer was produced."
                 _workspace_append_message(
                     "assistant",
                     "agent",
@@ -2166,7 +2166,7 @@ if st.session_state.mode == "workspace":
                     },
                 )
                 _workspace_note_chat("assistant", answer)
-                _workspace_set_context(f"?????{composer_value.strip()}", answer)
+                _workspace_set_context(f"Research: {composer_value.strip()}", answer)
                 st.session_state.workspace_prompt = ""
                 st.rerun()
 
@@ -2174,14 +2174,14 @@ if st.session_state.mode == "workspace":
 
             selected_profile = st.session_state.get("workspace_agent_profile", DEFAULT_SKILL_PROFILE)
             max_steps = int(st.session_state.get("workspace_agent_steps", 8))
-            with st.spinner("???? ReAct ????..."):
+            with st.spinner("Running ReAct research..."):
                 result = run_agent(
                     question=composer_value.strip(),
                     engine=engine,
                     max_steps=max_steps,
                     skill_profile=selected_profile,
                 )
-            answer = result.get("answer", "") or "???????????????"
+            answer = result.get("answer", "") or "No usable answer was produced."
             _workspace_append_message(
                 "assistant",
                 "agent",
@@ -2193,7 +2193,7 @@ if st.session_state.mode == "workspace":
                 },
             )
             _workspace_note_chat("assistant", answer)
-            _workspace_set_context(f"?????{composer_value.strip()}", answer)
+            _workspace_set_context(f"Research: {composer_value.strip()}", answer)
             st.session_state.workspace_prompt = ""
             st.rerun()
 
