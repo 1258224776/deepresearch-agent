@@ -1419,20 +1419,20 @@ if st.session_state.mode == "home":
                 
 """, unsafe_allow_html=True)
 
-    col1, col2, col3, col4 = st.columns(4, gap="large")
+    col1, col2 = st.columns(2, gap="large")
 
     with col1:
         st.markdown("""
 <div class="mode-card">
   <div class="mode-card-glow"></div>
-  <div class="mode-icon-wrap">🔍</div>
-  <div class="mode-title">探索与发现</div>
-  <div class="mode-desc">输入主题，选择来源类型和时间范围，AI 多角度搜索并抓取原始网页，呈现材料清单，你再决定下一步。</div>
+  <div class="mode-icon-wrap">📚</div>
+  <div class="mode-title">课题探索</div>
+  <div class="mode-desc">给一个研究主题，AI 多角度搜索并抓取原始网页，先呈现带引用的材料清单；再按需生成完整研究报告或看板，可选 Agent 自主决策。</div>
   <div class="mode-steps">
     <span class="mode-step">① 输入主题</span>
-    <span class="mode-step">② 筛选来源</span>
-    <span class="mode-step">③ 查看原料</span>
-    <span class="mode-step">④ 可选报告</span>
+    <span class="mode-step">② 查看原料</span>
+    <span class="mode-step">③ 按需成稿</span>
+    <span class="mode-step">④ 可启 Agent</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -1447,30 +1447,9 @@ if st.session_state.mode == "home":
         st.markdown("""
 <div class="mode-card">
   <div class="mode-card-glow"></div>
-  <div class="mode-icon-wrap">📝</div>
-  <div class="mode-title">直接生成研究报告</div>
-  <div class="mode-desc">输入研究问题，AI 自动搜索综合多方资料，直接输出结构完整、有数据支撑的深度报告。</div>
-  <div class="mode-steps">
-    <span class="mode-step">① 输入问题</span>
-    <span class="mode-step">② AI 综合分析</span>
-    <span class="mode-step">③ 输出报告</span>
-    <span class="mode-step">④ 可保存</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("生成研究报告 →", use_container_width=True, type="primary", key="b_report"):
-            st.session_state.mode  = "direct"
-            st.session_state.phase = "input"
-            st.rerun()
-
-    with col3:
-        st.markdown("""
-<div class="mode-card">
-  <div class="mode-card-glow"></div>
-  <div class="mode-icon-wrap">⚡</div>
-  <div class="mode-title">数据清洗与提取</div>
-  <div class="mode-desc">粘贴已知网址 + 描述你想要什么，主脑 AI 制定规则，打工 AI 并发提取结构化数据，自动生成看板。</div>
+  <div class="mode-icon-wrap">🧩</div>
+  <div class="mode-title">网页提取</div>
+  <div class="mode-desc">已经有一批 URL，描述你想抽的字段，主脑 AI 制定规则，打工 AI 并发抽取结构化数据并自动生成看板。</div>
   <div class="mode-steps">
     <span class="mode-step">① 贴入 URL</span>
     <span class="mode-step">② 描述意图</span>
@@ -1480,29 +1459,8 @@ if st.session_state.mode == "home":
 </div>
 """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("开始数据提取 →", use_container_width=True, type="primary", key="b_ue"):
+        if st.button("开始提取 →", use_container_width=True, type="primary", key="b_ue"):
             st.session_state.mode  = "url_extract"
-            st.session_state.phase = "input"
-            st.rerun()
-
-    with col4:
-        st.markdown("""
-<div class="mode-card">
-  <div class="mode-card-glow"></div>
-  <div class="mode-icon-wrap">🤖</div>
-  <div class="mode-title">Agent 自主模式</div>
-  <div class="mode-desc">输入问题，AI 自主决策：搜索、爬取、检索本地文档……反复推理直到找到答案，全程可见每步思考过程。</div>
-  <div class="mode-steps">
-    <span class="mode-step">① 输入问题</span>
-    <span class="mode-step">② 自主调用工具</span>
-    <span class="mode-step">③ 逐步推理</span>
-    <span class="mode-step">④ 输出报告</span>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("启动 Agent →", use_container_width=True, type="primary", key="b_agent"):
-            st.session_state.mode  = "agent"
             st.session_state.phase = "input"
             st.rerun()
 
@@ -1548,13 +1506,54 @@ elif st.session_state.mode == "scrape":
     if st.session_state.phase == "input":
         st.markdown("""
 <div class="page-hero">
-  <div class="page-hero-title">🔍 <span class="accent">探索</span>与发现</div>
-  <div class="page-hero-sub">输入研究主题，选择来源类型和时间范围，AI 并行爬取后呈现原始材料清单，你再决定下一步。</div>
+  <div class="page-hero-title">📚 <span class="accent">课题</span>探索</div>
+  <div class="page-hero-sub">输入研究主题，AI 多角度爬取后呈现材料清单；如需更主动的调研，可开启 Agent 自主决策。</div>
 </div>
 """, unsafe_allow_html=True)
 
         if st.session_state.local_docs:
             st.info(f"📂 已加载 {len(st.session_state.local_docs)} 个本地文档，研究时将与网络资料交叉融合")
+
+        # ── Agent 自主决策 开关（form 外，用以动态展开子模式） ──
+        agent_mode_on = st.toggle(
+            "🤖 启用 Agent 自主决策",
+            value=st.session_state.get("scrape_use_agent", False),
+            key="scrape_use_agent",
+            help=(
+                "关闭：标准流程，AI 并行爬取后先给材料清单，你决定是否继续生成报告。\n"
+                "开启：Agent 接管，自主规划工具调用，全程可见思考链。"
+            ),
+        )
+
+        agent_sub_is_planner = False
+        agent_profile = DEFAULT_SKILL_PROFILE
+        if agent_mode_on:
+            agent_sub = st.radio(
+                "Agent 运行模式",
+                ["⚡ 快速自主", "🗺️ 深度规划"],
+                horizontal=True,
+                key="scrape_agent_sub",
+                help=(
+                    "⚡ 快速自主：单一 ReAct 循环，适合明确的单一问题。\n"
+                    "🗺️ 深度规划：先拆成 3-5 个子问题逐一调研后综合，适合复杂多维问题。"
+                ),
+            )
+            agent_sub_is_planner = agent_sub.startswith("🗺️")
+            if agent_sub_is_planner:
+                agent_profile = "planner"
+                st.caption("Skill Profile：`planner`（固定，限制深度/批量爬取，控制子问题收敛）")
+            else:
+                agent_profile = st.selectbox(
+                    "Skill Profile",
+                    options=[DEFAULT_SKILL_PROFILE, "web_research_heavy"],
+                    index=0,
+                    key="scrape_agent_profile",
+                    format_func=lambda p: {
+                        "react_default":       "react_default · 平衡模式",
+                        "web_research_heavy":  "web_research_heavy · 网页研究增强",
+                    }.get(p, p),
+                    help="平衡模式更克制；网页研究增强会开放 batch / deep crawl。",
+                )
 
         with st.form("scrape_form"):
             topic = st.text_input(
@@ -1566,17 +1565,40 @@ elif st.session_state.mode == "scrape":
             with col_a:
                 source_type = st.selectbox(
                     "来源类型",
-                    ["全网综合", "新闻资讯（时效优先）", "技术文档（深度优先）", "学术/论文"],
+                    ["全网综合", "新闻资讯（时效优先）", "技术文档（深度优先)", "学术/论文"],
+                    disabled=agent_mode_on,
+                    help="Agent 模式下该筛选失效，由 Agent 自主决策。" if agent_mode_on else None,
                 )
             with col_b:
                 time_range = st.selectbox(
                     "时间范围",
                     ["不限", "最近24小时", "最近一周", "最近一月", "最近一年"],
+                    disabled=agent_mode_on,
+                    help="Agent 模式下该筛选失效。" if agent_mode_on else None,
                 )
-            submitted = st.form_submit_button("🔍 开始探索", use_container_width=True, type="primary")
+            if agent_mode_on:
+                agent_max_steps = st.number_input(
+                    "Agent 最大步数",
+                    min_value=3, max_value=15, value=8, step=1,
+                    disabled=agent_sub_is_planner,
+                    help="深度规划固定子步数，数字无效。" if agent_sub_is_planner else None,
+                )
+            else:
+                agent_max_steps = 8
+
+            submit_label = "🤖 启动 Agent" if agent_mode_on else "🔍 开始探索"
+            submitted = st.form_submit_button(submit_label, use_container_width=True, type="primary")
             if submitted:
                 if not topic.strip():
                     st.error("❌ 请输入研究主题")
+                elif agent_mode_on:
+                    st.session_state.agent_question_submitted = topic.strip()
+                    st.session_state.agent_max_steps          = int(agent_max_steps)
+                    st.session_state.agent_is_planner         = agent_sub_is_planner
+                    st.session_state.agent_skill_profile      = agent_profile
+                    st.session_state.mode                     = "agent"
+                    st.session_state.phase                    = "running"
+                    st.rerun()
                 else:
                     _HINT = {
                         "新闻资讯（时效优先）": "（请侧重搜索最新新闻资讯）",
@@ -1982,214 +2004,6 @@ elif st.session_state.mode == "scrape":
                         )
                     st.markdown(answer)
                 st.session_state.chat_history.append({"role": "assistant", "content": answer})
-
-
-# ══════════════════════════════════════════════
-# 模式二：直接生成报告
-# ══════════════════════════════════════════════
-elif st.session_state.mode == "direct":
-
-    # ── 顶部导航栏 ──
-    st.markdown("""
-<div class="topbar-wrap">
-  <div class="topbar-brand"><div class="dot"></div>DeepResearch</div>
-  <div class="topbar-crumb-new">
-    首页 <span class="sep">›</span> <span class="cur">📝 生成研究报告</span>
-  </div>
-  <div></div>
-</div>
-""", unsafe_allow_html=True)
-    if st.button("← 返回首页", key="back_direct"):
-        go_home(); st.rerun()
-
-    if st.session_state.phase == "input":
-        st.markdown("""
-<div class="page-hero">
-  <div class="page-hero-title">你想<span class="accent">研究</span>什么？</div>
-  <div class="page-hero-sub">AI 自动搜索多方资料、综合分析，直接生成结构完整、有数据支撑的深度报告。</div>
-</div>
-""", unsafe_allow_html=True)
-
-        # 模板选择
-        st.markdown('<div style="font-size:0.8rem;color:#475569;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:10px">选择报告模板</div>', unsafe_allow_html=True)
-        tcols2 = st.columns(3)
-        tkeys2 = list(TEMPLATES.keys())
-        for i, tk in enumerate(tkeys2):
-            with tcols2[i % 3]:
-                tpl = TEMPLATES[tk]
-                is_sel = st.session_state.template == tk
-                border = "rgba(99,102,241,0.6)" if is_sel else "rgba(255,255,255,0.07)"
-                bg = "rgba(99,102,241,0.10)" if is_sel else "rgba(255,255,255,0.02)"
-                st.markdown(f"""
-<div style="background:{bg};border:1px solid {border};border-radius:12px;padding:14px 16px;margin-bottom:10px">
-  <div style="font-size:0.88rem;font-weight:700;color:#e2e8f0;margin-bottom:4px">{tpl['label']}</div>
-  <div style="font-size:0.75rem;color:#475569">{tpl['desc']}</div>
-</div>""", unsafe_allow_html=True)
-                if st.button("选择" if not is_sel else "✓ 已选", key=f"tpl_d_{tk}", use_container_width=True):
-                    st.session_state.template = tk
-                    st.rerun()
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.session_state.local_docs:
-            st.info(f"📂 已加载 {len(st.session_state.local_docs)} 个本地文档，将与网络资料交叉融合")
-
-        with st.form("direct_form"):
-            q = st.text_input("研究问题", placeholder="例如：2025 年 AI 大模型行业竞争格局分析", label_visibility="collapsed")
-            if st.form_submit_button("📝 生成研究报告", use_container_width=True, type="primary"):
-                if q.strip():
-                    st.session_state.question = q.strip()
-                    st.session_state.phase    = "generating"
-                    st.rerun()
-
-    elif st.session_state.phase == "generating":
-        question = st.session_state.question
-        tpl_sys  = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["system"]
-
-        st.markdown(f"""
-<div style="margin-bottom:16px">
-  <div style="font-size:1.3rem;font-weight:700;color:#f1f5f9;margin-bottom:6px">📝 正在生成报告：{question}</div>
-  <div style="font-size:0.83rem;color:#475569">AI 并行搜索中，请稍候...</div>
-</div>
-""", unsafe_allow_html=True)
-
-        prog_bar2  = st.progress(0, text="初始化...")
-        prog_text2 = st.empty()
-
-        def on_progress2(step, total, msg):
-            pct = int(step / total * 100)
-            prog_bar2.progress(pct, text=msg)
-            prog_text2.markdown(
-                f'<div style="font-size:0.81rem;color:#64748b;padding:2px 0">{msg}</div>',
-                unsafe_allow_html=True,
-            )
-
-        sources, _, _ = run_research(question, progress_callback=on_progress2)
-        prog_bar2.progress(100, text="✅ 数据收集完成，生成报告中...")
-        prog_text2.empty()
-
-        with st.spinner("📝 AI 综合分析，生成报告..."):
-            ctx = "\n\n".join([
-                f"【来源{i+1}】{s['title']}\n{s['url']}\n\n{s['raw_content']}"
-                for i, s in enumerate(sources)
-            ])
-            local_ctx = ""
-            if st.session_state.local_docs:
-                try:
-                    import rag as _rag
-                    _rag.build_vector_store(st.session_state.local_docs)
-                    local_ctx = "\n\n【本地文档精准摘录（RAG检索）】\n" + _rag.retrieve_as_context(question)
-                except Exception:
-                    local_ctx = "\n\n【本地文档资料】\n" + "\n\n".join([
-                        f"《{d['name']}》\n{d['content'][:3000]}"
-                        for d in st.session_state.local_docs
-                    ])
-            report = ai_generate(
-                f"以下资料：\n\n{ctx}{local_ctx}\n\n问题：{question}\n\n请生成完整研究报告。",
-                system=tpl_sys,
-            )
-
-        st.session_state.sources      = sources
-        st.session_state.report       = report
-        st.session_state.chat_history = []
-        st.session_state.validation   = {}
-        st.session_state.phase        = "done"
-        st.rerun()
-
-    elif st.session_state.phase == "done":
-        question = st.session_state.question
-        sources  = st.session_state.sources
-        tpl_label = TEMPLATES.get(st.session_state.template, TEMPLATES["general"])["label"]
-
-        st.markdown(f"""
-<div style="margin-bottom:16px">
-  <div style="font-size:1.4rem;font-weight:700;color:#f1f5f9;letter-spacing:-0.01em">📋 {question}</div>
-</div>
-""", unsafe_allow_html=True)
-
-        st.markdown(f"""
-<div class="stat-bar">
-  <div class="stat-chip">📚 参考来源 <span class="val">{len(sources)}</span></div>
-  <div class="stat-chip">📋 模板 <span class="val">{tpl_label}</span></div>
-  {'<div class="stat-chip">📂 本地文档 <span class="val">' + str(len(st.session_state.local_docs)) + '</span></div>' if st.session_state.local_docs else ''}
-</div>
-""", unsafe_allow_html=True)
-
-        with st.expander(f"📚 参考来源（{len(sources)} 个）", expanded=False):
-            for i, s in enumerate(sources):
-                st.markdown(
-                    f'<span style="background:rgba(99,102,241,0.12);color:#818cf8;border-radius:5px;'
-                    f'padding:1px 8px;font-size:0.72rem;font-weight:700">{i+1}</span> '
-                    f'[{s["title"]}]({s["url"]}) '
-                    f'<span style="color:#334155;font-size:0.78rem">{s["domain"]}</span>',
-                    unsafe_allow_html=True,
-                )
-
-        # 交叉验证
-        if not st.session_state.validation:
-            if st.button("🔬 运行多源交叉验证", key="val_direct"):
-                with st.spinner("AI 正在分析各来源的一致性与争议点..."):
-                    st.session_state.validation = cross_validate(sources, question)
-                st.rerun()
-
-        if st.session_state.validation:
-            val = st.session_state.validation
-            reliability_color = {"high": "#34d399", "medium": "#fbbf24", "low": "#f87171"}.get(val.get("reliability", "medium"), "#fbbf24")
-            st.markdown(f"""
-<div style="background:rgba(15,23,42,0.7);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:20px 24px;margin-bottom:20px">
-  <div style="font-size:0.72rem;font-weight:700;color:#475569;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:14px">🔬 多源交叉验证结果</div>
-  <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:14px">
-    <div><span style="font-size:0.78rem;color:#64748b">整体可靠性</span><br><span style="font-size:1.1rem;font-weight:700;color:{reliability_color}">{val.get('reliability','').upper()}</span></div>
-    <div style="flex:1"><span style="font-size:0.78rem;color:#64748b">共识</span><br><span style="font-size:0.86rem;color:#cbd5e1">{val.get('consensus','')}</span></div>
-  </div>
-  <div style="background:rgba(245,158,11,0.06);border:1px solid rgba(245,158,11,0.15);border-radius:8px;padding:10px 14px;font-size:0.84rem;color:#fbbf24">
-    ⚡ 争议点：{val.get('disputes', '无明显争议')}
-  </div>
-</div>""", unsafe_allow_html=True)
-
-        st.markdown(f'<div class="section-title">研究报告 · {tpl_label}</div>', unsafe_allow_html=True)
-        st.markdown('<div class="report-wrap">', unsafe_allow_html=True)
-        st.markdown(st.session_state.report)
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown("")
-
-        c1, c2, c3 = st.columns([2, 2, 1])
-        with c1:
-            if st.button("💾 保存报告", type="primary", use_container_width=True, key="save_direct"):
-                fp = save_report(question, st.session_state.report)
-                st.success(f"✅ 已保存：{fp}")
-        with c2:
-            if st.button("📝 重新研究", use_container_width=True):
-                st.session_state.phase = "input"
-                st.session_state.report = ""
-                st.session_state.sources = []
-                st.session_state.validation = {}
-                st.session_state.chat_history = []
-                st.rerun()
-        with c3:
-            if st.button("🏠 首页", use_container_width=True, key="home_direct"):
-                go_home(); st.rerun()
-
-        # ── Chat with Report ──
-        st.markdown('<div class="section-title" style="margin-top:36px">💬 追问报告</div>', unsafe_allow_html=True)
-        st.markdown('<div style="font-size:0.82rem;color:#475569;margin-bottom:16px">基于本次研究内容继续提问</div>', unsafe_allow_html=True)
-
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"], avatar="🧑" if msg["role"] == "user" else "🤖"):
-                st.markdown(msg["content"])
-
-        chat_input2 = st.chat_input("继续追问，例如：帮我把竞品数据做成表格...", key="chat_direct")
-        if chat_input2:
-            st.session_state.chat_history.append({"role": "user", "content": chat_input2})
-            with st.chat_message("user", avatar="🧑"):
-                st.markdown(chat_input2)
-            with st.chat_message("assistant", avatar="🤖"):
-                with st.spinner("思考中..."):
-                    answer = chat_with_report(
-                        question, st.session_state.report,
-                        st.session_state.chat_history[:-1], chat_input2,
-                    )
-                st.markdown(answer)
-            st.session_state.chat_history.append({"role": "assistant", "content": answer})
 
 
 # ══════════════════════════════════════════════
