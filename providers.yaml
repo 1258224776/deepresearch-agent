@@ -18,7 +18,7 @@ providers:
 
   google_pro:
     env: GOOGLE_API_KEY
-    model: gemini-3.0-pro-preview
+    model: gemini-2.5-pro
     type: google
     structured_output: true
 

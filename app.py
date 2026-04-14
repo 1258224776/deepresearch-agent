@@ -159,24 +159,49 @@ div[data-testid="stMetricDelta"] * { color: var(--text-secondary) !important; }
 header[data-testid="stHeader"] {
     background: transparent !important;
     box-shadow: none !important;
-    height: 2.75rem !important;
+    height: 3.25rem !important;
+    z-index: 999 !important;
 }
 /* 只隐藏右上 Deploy/菜单，保留左上 sidebar 折叠/展开按钮 */
 div[data-testid="stToolbar"],
 #MainMenu {
     display: none !important;
 }
-/* 侧边栏折叠/展开控件着色 */
-div[data-testid="collapsedControl"],
+/* 侧边栏折叠后的「展开」按钮：醒目暖色圆形，固定左上 */
+div[data-testid="collapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: fixed !important;
+    top: 12px !important;
+    left: 12px !important;
+    z-index: 1000 !important;
+    background: var(--accent) !important;
+    border-radius: 10px !important;
+    padding: 6px 8px !important;
+    box-shadow: 0 4px 14px rgba(194, 87, 26, 0.30) !important;
+}
+div[data-testid="collapsedControl"] svg,
+div[data-testid="collapsedControl"] * {
+    color: #ffffff !important;
+    fill: #ffffff !important;
+}
+/* 侧边栏顶部那个「←」收起按钮也给它点对比 */
 button[data-testid="baseButton-header"],
 button[data-testid="baseButton-headerNoPadding"] {
     color: var(--accent) !important;
+    background: var(--accent-soft) !important;
+    border-radius: 8px !important;
 }
-div[data-testid="collapsedControl"] svg,
 button[data-testid="baseButton-header"] svg,
 button[data-testid="baseButton-headerNoPadding"] svg {
     fill: var(--accent) !important;
     color: var(--accent) !important;
+}
+/* 强制显示侧边栏本体（防御性） */
+section[data-testid="stSidebar"][aria-expanded="true"] {
+    display: flex !important;
+    min-width: 260px !important;
 }
 
 /* 代码块与行内代码 */
@@ -2413,7 +2438,7 @@ def _provider_display_name(name: str) -> str:
 
 def _provider_compact_name(name: str) -> str:
     custom = {
-        "google_pro": "Gemini 3.0",
+        "google_pro": "Gemini 2.5 Pro",
         "google": "Gemini 2.5",
         "claude_opus": "Claude Opus",
         "claude_haiku": "Claude Haiku",
