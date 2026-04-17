@@ -41,7 +41,7 @@ from prompts import (
     prompt_orchestrate,
     prompt_worker_extract,
 )
-from tools import fetch_page_content, fetch_via_jina, web_search
+from runtime_adapters import fetch_page_text, fetch_reader_text, search_results
 
 
 # ══════════════════════════════════════════════
@@ -544,10 +544,10 @@ def extract_list_data(page_content: str, target_item: str) -> list[dict]:
 def _fetch_and_extract(args: tuple) -> list[dict]:
     """线程工作函数：抓取列表页并提取结构化数据（aggregation 模式）。"""
     r, target_item = args
-    url = r.get("href", "")
+    url = r.get("url", "") or r.get("href", "")
     if not url:
         return []
-    content = fetch_via_jina(url)
+    content = fetch_reader_text(url)
     if not content or len(content) < 100:
         return []
     items = extract_list_data(content, target_item)
@@ -738,7 +738,7 @@ def run_url_pipeline(
     schema: dict = {}
     with ThreadPoolExecutor(max_workers=FETCH_WORKERS + 1) as ex:
         orch_fut  = ex.submit(orchestrate, user_intent, engine)
-        fetch_map = {ex.submit(fetch_via_jina, url): url for url in urls}
+        fetch_map = {ex.submit(fetch_reader_text, url): url for url in urls}
 
         done = 0
         for fut in as_completed(fetch_map):
@@ -867,8 +867,8 @@ def run_aggregation(
     all_results: list[tuple] = []
     seen_urls: set[str] = set()
     for query in queries:
-        for r in web_search(query, max_results=max_pages):
-            url = r.get("href", "")
+        for r in search_results(query, max_results=max_pages):
+            url = r.get("url", "") or r.get("href", "")
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 all_results.append((r, target_item))
@@ -919,12 +919,12 @@ def run_aggregation(
 def _fetch_and_summarize(args: tuple) -> dict | None:
     """线程工作函数：爬取单个 URL 并提炼摘要。"""
     r, question = args
-    url = r.get("href", "")
+    url = r.get("url", "") or r.get("href", "")
     if not url:
         return None
     title = r.get("title", "无标题")
     domain = urlparse(url).netloc
-    content = fetch_page_content(url)
+    content = fetch_page_text(url)
     if "抓取失败" in content or len(content) < 100:
         return None
     info = summarize_source(content, question, title)
@@ -979,8 +979,8 @@ def run_research(
     all_results: list[tuple] = []
     seen_urls: set[str] = set()
     for query in queries:
-        for r in web_search(query, max_results=SEARCH_MAX_RESULTS, timelimit=timelimit):
-            url = r.get("href", "")
+        for r in search_results(query, max_results=SEARCH_MAX_RESULTS, timelimit=timelimit):
+            url = r.get("url", "") or r.get("href", "")
             if url and url not in seen_urls:
                 seen_urls.add(url)
                 all_results.append((r, question))

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from report import Observation
 
-from .adapters import ddgs_search, render_results_as_markdown, results_to_sources
+from .adapters import render_provider_summary, render_results_as_markdown, results_to_sources, search_results
 from .base import Skill, SkillContext, SkillSpec
 
 
@@ -36,9 +36,13 @@ class SearchRecentSkill(Skill):
         max_results = int(str(args.get("max_results", "6")).strip() or "6")
         if ctx.progress_callback:
             ctx.progress_callback(f"近期搜索：{query}")
-        results = ddgs_search(query, max_results=max(1, min(max_results, 10)), timelimit=period)
+        results = search_results(query, max_results=max(1, min(max_results, 10)), timelimit=period)
+        content = render_results_as_markdown(results) if results else "（近期搜索无结果）"
+        provider_summary = render_provider_summary(results)
+        if provider_summary:
+            content = f"{provider_summary}\n\n{content}"
         return Observation(
-            content=render_results_as_markdown(results) if results else "（近期搜索无结果）",
+            content=content,
             sources=results_to_sources(results),
             tool=self.spec.name,
             args=args,

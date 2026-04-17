@@ -339,14 +339,13 @@ def prompt_worker_extract(chunk: str, fields_desc: str, worker_instructions: str
 
 
 def prompt_chat_with_report(question: str, report: str, history: str, user_msg: str) -> str:
+    history_block = f"对话历史：\n{history}\n\n" if history else ""
     return f"""研究主题：{question}
 
 研究报告：
 {report[:4000]}
 
-{'对话历史：\n' + history if history else ''}
-
-用户追问：{user_msg}"""
+{history_block}用户追问：{user_msg}"""
 
 
 def prompt_extract_list(page_content: str, target_item: str) -> str:

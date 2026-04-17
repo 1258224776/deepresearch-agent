@@ -1,0 +1,42 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deepresearch-backend
+    env_file:
+      - .env
+    environment:
+      HF_HOME: /app/.cache/huggingface
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./data/huggingface:/app/.cache/huggingface
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    container_name: deepresearch-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  deer-rag:
+    build:
+      context: ../deer-rag
+    container_name: deer-rag
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data/rag:/app/data
+    restart: unless-stopped
+    profiles:
+      - full

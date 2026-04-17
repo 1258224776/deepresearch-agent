@@ -26,7 +26,7 @@
 | `d:\agent-one\agent_loop.py` | 改造 | `_run_tool` 返回 `Observation`；`run_agent` 持有 `CitationRegistry`；`finish` 走 `compose_report` |
 | `d:\agent-one\agent_planner.py` | 改造 | Reporter 阶段改调 `compose_report`；Memory 也存结构化 Observation |
 | `d:\agent-one\prompts.py` | 新增 10 个函数 | 1 个分类 prompt + 9 个报告模板 |
-| `d:\agent-one\app.py` | 小改 | 运行阶段展示参考来源表；章节化显示 |
+| 旧 Web UI（已移除） | 小改 | 运行阶段展示参考来源表；章节化显示 |
 | `d:\agent-one\tools.py` | 只读复用 | `web_search` / `fetch_via_jina` 等已返回 URL |
 
 ---
@@ -151,7 +151,7 @@ def compose_report(
 - `_synthesize` 改为 `report.compose_report(question, all_obs, shared_registry, engine)`
 - `PlannerMemory.as_context()` 可额外包含已有的 [1][2] 编号，让后续子问题的 LLM 学会引用已登记的来源
 
-### 5. app.py 展示层
+### 5. 旧 Web UI 展示层（已移除）
 
 运行阶段下方新增一个 `st.expander("📚 参考来源", expanded=False)`，列 `registry.as_refs_md()`。每步 observation 的展开面板里多一行 `**来源**：[1][2]`。
 
@@ -174,7 +174,7 @@ def compose_report(
 1. **单元级**：
    - `python -c "from report import classify_question; print(classify_question('特斯拉和比亚迪 2024 年谁赚得多？'))"` → 期望 `COMPARE`
    - `python -c "from report import CitationRegistry, Source; r=CitationRegistry(); print(r.add(Source(url='a', title='x'))); print(r.as_refs_md())"`
-2. **ReAct 端到端**：`streamlit run app.py` → Agent 自主 → 问「小米 SU7 在 2024 年的销量表现如何？」→ 验收：
+2. **ReAct 端到端**：旧 Web UI（已移除） → Agent 自主 → 问「小米 SU7 在 2024 年的销量表现如何？」→ 验收：
    - 最终报告每个数字后有 `[数字]` 标注
    - 「参考来源」面板有编号完整的 URL 列表
    - 无 URL 出现在正文里（都被替换成编号）

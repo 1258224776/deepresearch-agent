@@ -15,7 +15,7 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from report import Source
-from tools import fetch_page_full, fetch_via_jina
+from tools import fetch_page_content, fetch_page_full, fetch_via_jina
 
 
 def _normalize_url(url: str) -> str:
@@ -46,6 +46,14 @@ def fetch_page_bundle(url: str, max_chars: int = 6000) -> dict:
     }
 
 
+def fetch_page_text(url: str, max_chars: int = 6000) -> str:
+    return fetch_page_content(url, max_chars=max_chars)
+
+
+def fetch_reader_text(url: str, max_chars: int = 15000) -> str:
+    return fetch_via_jina(url, max_chars=max_chars)
+
+
 def fetch_page_with_links(url: str, max_chars: int = 4000) -> dict:
     content, links = fetch_page_full(url)
     return {
@@ -65,6 +73,22 @@ def batch_fetch_pages(urls: list[str], max_chars: int = 4000, limit: int = 5) ->
             continue
         bundles.append(fetch_page_bundle(url, max_chars=max_chars))
     return bundles
+
+
+def deep_scrape_markdown(
+    start_url: str,
+    *,
+    max_pages: int = 5,
+    max_chars: int = 3000,
+    keywords: str | list[str] | None = None,
+) -> str:
+    bundles = crawl_same_domain(
+        start_url,
+        max_pages=max_pages,
+        max_chars=max_chars,
+        keywords=keywords,
+    )
+    return render_page_bundles_as_markdown(bundles, per_page_chars=max_chars)
 
 
 def _clean_links(links: list[str]) -> list[str]:

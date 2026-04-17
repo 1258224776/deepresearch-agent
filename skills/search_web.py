@@ -11,7 +11,7 @@ from __future__ import annotations
 from report import Observation
 
 from .base import Skill, SkillContext, SkillSpec
-from .adapters import ddgs_search, render_results_as_markdown, results_to_sources
+from .adapters import render_provider_summary, render_results_as_markdown, results_to_sources, search_results
 
 
 class SearchWebSkill(Skill):
@@ -36,9 +36,13 @@ class SearchWebSkill(Skill):
         timelimit = str(args.get("timelimit", "")).strip()
         if ctx.progress_callback:
             ctx.progress_callback(f"搜索：{query}")
-        results = ddgs_search(query, max_results=max(1, min(max_results, 10)), timelimit=timelimit)
+        results = search_results(query, max_results=max(1, min(max_results, 10)), timelimit=timelimit)
+        content = render_results_as_markdown(results) if results else "（搜索无结果）"
+        provider_summary = render_provider_summary(results)
+        if provider_summary:
+            content = f"{provider_summary}\n\n{content}"
         return Observation(
-            content=render_results_as_markdown(results) if results else "（搜索无结果）",
+            content=content,
             sources=results_to_sources(results),
             tool=self.spec.name,
             args=args,

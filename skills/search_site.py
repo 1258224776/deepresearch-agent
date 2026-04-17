@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from report import Observation
 
-from .adapters import build_site_query, ddgs_search, render_results_as_markdown, results_to_sources
+from .adapters import build_site_query, render_provider_summary, render_results_as_markdown, results_to_sources, search_results
 from .base import Skill, SkillContext, SkillSpec
 
 
@@ -40,9 +40,13 @@ class SearchSiteSkill(Skill):
         full_query = build_site_query(query, site)
         if ctx.progress_callback:
             ctx.progress_callback(f"站内搜索：{full_query}")
-        results = ddgs_search(full_query, max_results=max(1, min(max_results, 10)), timelimit=timelimit)
+        results = search_results(full_query, max_results=max(1, min(max_results, 10)), timelimit=timelimit)
+        content = render_results_as_markdown(results) if results else "（站内搜索无结果）"
+        provider_summary = render_provider_summary(results)
+        if provider_summary:
+            content = f"{provider_summary}\n\n{content}"
         return Observation(
-            content=render_results_as_markdown(results) if results else "（站内搜索无结果）",
+            content=content,
             sources=results_to_sources(results),
             tool=self.spec.name,
             args=args,

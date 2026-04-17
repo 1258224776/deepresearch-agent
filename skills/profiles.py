@@ -83,6 +83,17 @@ _PROFILE_DEFAULTS: dict[str, dict[str, object]] = {
     },
 }
 
+# Compatibility export for older imports that expect a module-level PROFILES map.
+# This exposes the static defaults only; runtime filtering still happens via
+# get_skill_profiles()/get_profile_allowlist().
+PROFILES: dict[str, dict[str, object]] = {
+    name: {
+        "description": str(entry.get("description", "")),
+        "allow": list(entry.get("allow", [])),
+    }
+    for name, entry in _PROFILE_DEFAULTS.items()
+}
+
 
 @dataclass(frozen=True, slots=True)
 class SkillProfile:
@@ -165,3 +176,13 @@ def get_profile_metadata_list(skill_names: list[str]) -> list[dict]:
         }
         for profile in profiles.values()
     ]
+
+
+__all__ = [
+    "DEFAULT_SKILL_PROFILE",
+    "PROFILES",
+    "SkillProfile",
+    "get_profile_allowlist",
+    "get_profile_metadata_list",
+    "get_skill_profiles",
+]

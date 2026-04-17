@@ -6,16 +6,20 @@ main.py — CLI 入口 & 服务启动
   tools.py    — 爬取、搜索、文件工具
   agent.py    — LLM 调用、推理、分析逻辑
   main.py     — CLI 入口（本文件）
-  app.py      — Streamlit Web UI
+  api.py      — FastAPI 后端
 """
 import os
 import re
 
 from agent import ai_generate, reason, ai_extract, chat_with_report, run_research
 from prompts import SYSTEM_PROMPT
-from tools import (
-    fetch_page_content, fetch_page_full, deep_scrape,
-    web_search, save_scraped, save_report,
+from runtime_adapters import (
+    deep_scrape_markdown,
+    fetch_page_text,
+    fetch_page_with_links,
+    save_markdown_report as save_report,
+    save_scraped_page as save_scraped,
+    search_results,
 )
 
 os.makedirs("reports", exist_ok=True)
@@ -53,10 +57,10 @@ def handle_scrape(command: str) -> None:
 
     if deep_mode:
         print(f"\n  开始深度爬取: {url}\n  （最多5页）\n")
-        content = deep_scrape(url, max_pages=5)
+        content = deep_scrape_markdown(url, max_pages=5)
     else:
         print(f"\n  正在爬取: {url}")
-        content, _ = fetch_page_full(url)
+        content = fetch_page_with_links(url).get("content", "")
 
     if not content or content.startswith("（"):
         print(f"爬取失败: {content}")
@@ -99,14 +103,14 @@ def ask(user_input: str) -> str:
 
     for i, query in enumerate(sub_queries, 1):
         print(f"  [{i}/{len(sub_queries)}] 搜索「{query}」")
-        for r in web_search(query, max_results=3):
-            url = r.get("href", "")
+        for r in search_results(query, max_results=3):
+            url = r.get("url", "") or r.get("href", "")
             if not url or url in seen_urls:
                 continue
             seen_urls.add(url)
             title = r.get("title", "无标题")
             print(f"    抓取: {url[:70]}...")
-            full_text = fetch_page_content(url)
+            full_text = fetch_page_text(url)
             all_blocks.append(
                 f"【标题】{title}\n【网址】{url}\n【正文】{full_text}"
             )

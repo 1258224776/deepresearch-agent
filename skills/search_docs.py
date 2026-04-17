@@ -15,6 +15,7 @@ from .adapters import (
     batch_search_queries,
     build_site_query,
     merge_result_sets,
+    render_provider_summary,
     render_results_as_markdown,
     results_to_sources,
 )
@@ -68,8 +69,11 @@ class SearchDocsSkill(Skill):
         results = merge_result_sets(*(items for _, items in grouped), limit=max(1, min(max_results, 12)))
         query_plan = "\n".join(f"- {item_query}" for item_query, _ in grouped)
         content = render_results_as_markdown(results) if results else "（文档搜索无结果）"
+        provider_summary = render_provider_summary(results)
         if query_plan:
             content = f"查询变体：\n{query_plan}\n\n搜索结果：\n{content}"
+        if provider_summary:
+            content = f"{provider_summary}\n\n{content}"
 
         return Observation(
             content=content,

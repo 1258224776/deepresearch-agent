@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: DeepResearch Agent API
-  version: 1.5.0
+  version: 1.6.0
   description: >
     HTTP wrapper for the DeepResearch ReAct workflow. Returns the final report,
     step trace, structured observations, deduplicated references, and built-in
@@ -160,6 +160,42 @@ paths:
                     type: array
                     items:
                       type: string
+  /api/search/providers:
+    get:
+      operationId: listSearchProviders
+      summary: List search providers
+      description: >
+        Return the currently active search provider order plus per-provider
+        configuration state for the Stage B multi-source search adapter layer.
+      responses:
+        "200":
+          description: Search provider catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active_order:
+                    type: array
+                    items:
+                      type: string
+                  providers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        enabled:
+                          type: boolean
+                        configured:
+                          type: boolean
+                        requested:
+                          type: boolean
+                        env_hints:
+                          type: array
+                          items:
+                            type: string
         "400":
           description: Invalid request
   /run:

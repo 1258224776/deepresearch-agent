@@ -1,0 +1,26 @@
+.git
+.gitignore
+.claude
+.pytest_cache
+.env
+.env.*
+.streamlit
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+node_modules
+.next
+frontend/node_modules
+frontend/.next
+frontend/.env.local
+reports
+scraped
+_originals
+DeepResearch Agent
+tests
+data/*.db
+data/*.faiss
+data/*.pkl

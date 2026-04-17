@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from report import Observation
 
-from .adapters import batch_search_queries, merge_result_sets, render_results_as_markdown, results_to_sources
+from .adapters import batch_search_queries, merge_result_sets, render_provider_summary, render_results_as_markdown, results_to_sources
 from .base import Skill, SkillContext, SkillSpec
 
 
@@ -49,8 +49,11 @@ class SearchNewsSkill(Skill):
             ctx.progress_callback(f"新闻搜索：{query}")
         query_plan = "\n".join(f"- {item_query}" for item_query, _ in grouped)
         content = render_results_as_markdown(results) if results else "（新闻搜索无结果）"
+        provider_summary = render_provider_summary(results)
         if query_plan:
             content = f"查询变体：\n{query_plan}\n\n搜索结果：\n{content}"
+        if provider_summary:
+            content = f"{provider_summary}\n\n{content}"
         return Observation(
             content=content,
             sources=results_to_sources(results),

@@ -10,6 +10,8 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.next/
+node_modules/
 
 # 环境变量（含密钥，不提交）
 .env
@@ -18,3 +20,6 @@ venv/
 .DS_Store
 Thumbs.db
 service-account.json
+data/*.db
+data/*.faiss
+data/*.pkl

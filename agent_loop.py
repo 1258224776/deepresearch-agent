@@ -13,6 +13,7 @@ from typing import Callable
 from pydantic import BaseModel, ValidationError, field_validator
 
 from agent import ai_generate_role, ai_tool_call, extract_json
+from memory import format_memory_context, search_memory
 from prompts import prompt_react_system
 from report import CitationRegistry, Observation, QuestionType, classify_question, compose_report
 from skills import BUILTIN_SKILL_REGISTRY
@@ -173,6 +174,7 @@ def _build_prompt(
     step_num: int = 0,
     max_steps: int = 8,
     registry: CitationRegistry | None = None,
+    memory_context: str = "",
     force_finish: bool = False,
 ) -> str:
     """
@@ -183,6 +185,9 @@ def _build_prompt(
     display = _compress_history(history)
 
     lines = [f"用户问题：{question}", ""]
+    if memory_context:
+        lines.append(memory_context)
+        lines.append("")
     if display:
         lines.append("## 已执行步骤")
         for i, step in enumerate(display, 1):
@@ -258,6 +263,8 @@ def run_agent(
     use_router: bool = True,
     question_type: QuestionType | None = None,
     skill_profile: str = DEFAULT_SKILL_PROFILE,
+    memory_context: str | None = None,
+    preferred_thread_id: str | None = None,
 ) -> dict:
     """
     ReAct Agent 主入口。
@@ -282,6 +289,18 @@ def run_agent(
         registry = CitationRegistry()
     enabled_skills = get_enabled_skill_names(SKILL_REGISTRY.names())
     resolved_profile, profile_skills = get_profile_allowlist(skill_profile, enabled_skills)
+    if memory_context is None:
+        memory_hits = search_memory(
+            question,
+            top_k=3,
+            preferred_thread_id=preferred_thread_id,
+        )
+        resolved_memory_context = format_memory_context(memory_hits)
+        if progress_callback and memory_hits:
+            progress_callback(f"已召回 {len(memory_hits)} 条历史研究记忆")
+    else:
+        memory_hits = []
+        resolved_memory_context = memory_context.strip()
 
     # ── 入口预路由（Stage 1） ──
     if use_router:
@@ -340,7 +359,9 @@ def run_agent(
             prompt = _build_prompt(
                 question, history,
                 step_num=step_num, max_steps=max_steps,
-                registry=registry, force_finish=force_finish_next,
+                registry=registry,
+                memory_context=resolved_memory_context,
+                force_finish=force_finish_next,
             )
             action: ReActAction | None = None
 
@@ -453,6 +474,8 @@ def run_agent(
                     "answer": answer,
                     "steps": history,
                     "observations": [o.model_dump() for o in observations],
+                    "memory_hits": memory_hits,
+                    "memory_hit_count": len(memory_hits),
                     "registry": registry,
                     "question_type": qtype.value,
                     "skill_profile": resolved_profile,
@@ -519,6 +542,8 @@ def run_agent(
             "answer": answer,
             "steps": history,
             "observations": [o.model_dump() for o in observations],
+            "memory_hits": memory_hits,
+            "memory_hit_count": len(memory_hits),
             "registry": registry,
             "question_type": qtype.value,
             "skill_profile": resolved_profile,
@@ -533,6 +558,8 @@ def run_agent(
             "answer": f"Agent 运行出错：{exc}",
             "steps": history,
             "observations": [o.model_dump() for o in observations],
+            "memory_hits": memory_hits,
+            "memory_hit_count": len(memory_hits),
             "registry": registry,
             "question_type": qtype.value if use_router else "research",
             "skill_profile": resolved_profile,

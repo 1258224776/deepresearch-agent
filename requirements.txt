@@ -1,4 +1,7 @@
-streamlit
+fastapi
+uvicorn
+aiosqlite
+sse-starlette
 google-genai
 openai
 ddgs

@@ -98,10 +98,14 @@ ANTHROPIC_API_KEY=你的Key
 
 **4. 启动**
 ```bash
-python -m streamlit run app.py
+python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-浏览器访问 `http://localhost:8501`
+前端开发环境：
+```bash
+cd frontend
+npm run dev
+```
 
 ---
 
@@ -109,7 +113,7 @@ python -m streamlit run app.py
 
 ```
 deepresearch-agent/
-├── app.py              # Streamlit 前端主程序（4 种模式）
+├── frontend/           # Next.js 前端
 ├── agent.py            # AI 调用核心：多提供商路由、原生 Function Calling
 ├── agent_loop.py       # ReAct Agent：工具注册 + 推理循环（7 种工具）
 ├── agent_planner.py    # 深度规划 Agent：Planner/Executor/Memory/Reporter

@@ -82,7 +82,7 @@
 | 路由第一版 | 问题分类后白名单 + 起手建议 | `skills/router.py`, `agent_loop.py` |
 | 路由防抖 | 重复动作拦截、无新来源强制收敛 | `skills/router.py` |
 | Prompt 白名单 | 只把 shortlisted skill 喂给 LLM | `prompts.py`, `agent_loop.py` |
-| 元数据暴露 | `/skills` API + 侧边栏 | `api.py`, `app.py` |
+| 元数据暴露 | `/skills` API + 侧边栏 | `api.py`, 旧 Web UI（已移除） |
 
 
 ## 第二版总体方案
@@ -289,7 +289,7 @@ SKILL_GUIDANCE = {
 
 ### 6. UI 增加 Route Debug 面板
 
-在 `app.py` 中增加一个只读调试面板，展示：
+在旧 Web UI（已移除）中增加一个只读调试面板，展示：
 
 - 当前 profile
 - 当前问题分类
@@ -330,7 +330,7 @@ docs/
 | C10 | Router v2 | 从 `EntryRoute` 扩成 `RouteDecision` | `skills/router.py`, `agent_loop.py` | 返回 allowed / preferred / starter / reasons |
 | C11 | Guidance 附录 | 为 shortlisted skill 注入短说明 | `skills/guidance.py`, `prompts.py` | prompt 里不只剩 schema，还有精简使用建议 |
 | C12 | 调试接口 | 新增 `/skills/route-preview` | `api.py`, `openapi.yaml` | 可用 HTTP 预览路由结果 |
-| C13 | UI 可解释性 | 展示 route debug 面板 | `app.py` | 页面里能看见分类、starter、候选 skill |
+| C13 | UI 可解释性 | 展示 route debug 面板 | 旧 Web UI（已移除） | 页面里能看见分类、starter、候选 skill |
 | C14 | 测试与回归 | 增加路由快照测试与回归问题集 | `tests/` 或本地验证脚本 | 常见问题命中预期 skill |
 
 
@@ -445,4 +445,3 @@ docs/
 一句话概括：
 
 > 第一版阶段 C 解决了“skill 能跑”；第二版阶段 C 要解决“skill 怎么被稳定、可控、可解释地用起来”。  
-
