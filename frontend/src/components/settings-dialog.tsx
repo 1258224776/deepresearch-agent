@@ -7,10 +7,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocale } from "@/components/locale-provider";
 import { useSettings } from "@/components/settings-provider";
 import {
+  getSkillCatalog,
   getSearchDiagnostics,
   getSearchProviders,
   type SearchDiagnostics,
   type SearchProviderCatalog,
+  type SkillCatalog,
+  type SkillInfo,
+  setSkillEnabled,
 } from "@/lib/api";
 import { DEFAULT_API_BASE, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/settings";
 
@@ -45,6 +49,19 @@ function Field({
   );
 }
 
+function formatUsageTimestamp(timestamp: number, locale: "zh" | "en") {
+  if (!timestamp) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
 export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
   const { locale, text } = useLocale();
   const { settings, updateSettings, resetSettings } = useSettings();
@@ -56,6 +73,9 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [providerCatalog, setProviderCatalog] = useState<SearchProviderCatalog | null>(null);
   const [providerError, setProviderError] = useState("");
+  const [skillCatalog, setSkillCatalog] = useState<SkillCatalog | null>(null);
+  const [skillError, setSkillError] = useState("");
+  const [skillPendingName, setSkillPendingName] = useState("");
 
   const connectionLabel = useMemo(() => {
     try {
@@ -89,6 +109,28 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
     };
   }, [locale]);
 
+  const skillText = useMemo(() => {
+    const isZh = locale === "zh";
+    return {
+      title: isZh ? "技能治理" : "Skill governance",
+      subtitle: isZh ? "统一管理后端已注册技能的启停状态、配置可用性和调用统计。" : "Manage backend skill availability, runtime status, and usage stats.",
+      unavailable: isZh ? "暂时无法读取 skill 状态" : "Skill status unavailable",
+      enabled: isZh ? "已启用" : "Enabled",
+      disabled: isZh ? "已停用" : "Disabled",
+      configured: isZh ? "可运行" : "Configured",
+      missing: isZh ? "缺少配置" : "Missing config",
+      calls: isZh ? "调用" : "Calls",
+      success: isZh ? "成功" : "Success",
+      failure: isZh ? "失败" : "Failure",
+      avgDuration: isZh ? "均时" : "Avg",
+      lastUsed: isZh ? "最近调用" : "Last used",
+      envHints: isZh ? "环境提示" : "Env hints",
+      empty: isZh ? "还没有可显示的技能元数据" : "No skill metadata available.",
+      profiles: isZh ? "配置概览" : "Profiles",
+      saving: isZh ? "更新中..." : "Updating...",
+    };
+  }, [locale]);
+
   useEffect(() => {
     let cancelled = false;
     if (!open) {
@@ -111,6 +153,33 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
     }
 
     void loadProviders();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, settings.apiBase]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!open) {
+      return undefined;
+    }
+
+    async function loadSkills() {
+      try {
+        const data = await getSkillCatalog();
+        if (!cancelled) {
+          setSkillCatalog(data);
+          setSkillError("");
+        }
+      } catch {
+        if (!cancelled) {
+          setSkillCatalog(null);
+          setSkillError(settings.apiBase);
+        }
+      }
+    }
+
+    void loadSkills();
     return () => {
       cancelled = true;
     };
@@ -155,6 +224,30 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
       setDiagnosticsError(error instanceof Error ? error.message : String(error));
     } finally {
       setDiagnosticsLoading(false);
+    }
+  }
+
+  async function handleToggleSkill(skill: SkillInfo) {
+    const nextEnabled = !skill.enabled;
+    setSkillPendingName(skill.name);
+    setSkillError("");
+    try {
+      const updated = await setSkillEnabled(skill.name, nextEnabled);
+      setSkillCatalog((current) => {
+        if (!current) {
+          return current;
+        }
+        const skills = current.skills.map((item) => (item.name === updated.name ? updated : item));
+        return {
+          ...current,
+          enabled_skills: skills.filter((item) => item.enabled).length,
+          skills,
+        };
+      });
+    } catch (error) {
+      setSkillError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSkillPendingName("");
     }
   }
 
@@ -369,6 +462,106 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
                 </>
               )}
             </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]">
+              {skillText.title}
+            </div>
+            <p className="mt-2 text-xs leading-6 text-[var(--text-3)]">
+              {skillText.subtitle}
+            </p>
+            {skillError ? (
+              <p className="mt-2 text-xs leading-6 text-[var(--danger)]">
+                {skillText.unavailable}: {skillError}
+              </p>
+            ) : (
+              <>
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-2)]">
+                  <span className="rounded-full bg-[var(--surface)] px-3 py-1 text-[var(--text-1)]">
+                    {skillCatalog?.enabled_skills ?? 0}/{skillCatalog?.total_skills ?? 0} {skillText.enabled.toLowerCase()}
+                  </span>
+                  {(skillCatalog?.profiles ?? []).slice(0, 4).map((profile) => (
+                    <span
+                      key={profile.name}
+                      className="rounded-full border border-[var(--border)] px-3 py-1 text-[var(--text-3)]"
+                    >
+                      {profile.name} {profile.allowed_count}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-3 grid max-h-[320px] gap-2 overflow-y-auto pr-1 md:grid-cols-2">
+                  {(skillCatalog?.skills ?? []).map((skill) => (
+                    <div
+                      key={skill.name}
+                      className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-[var(--text-1)]">{skill.name}</div>
+                          <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-[var(--text-3)]">
+                            {skill.category}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSkill(skill)}
+                          disabled={skillPendingName === skill.name}
+                          className={
+                            skill.enabled
+                              ? "inline-flex min-w-20 items-center justify-center rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-semibold text-[var(--accent)] disabled:opacity-60"
+                              : "inline-flex min-w-20 items-center justify-center rounded-full bg-[var(--surface-2)] px-3 py-1 text-[11px] font-semibold text-[var(--text-3)] disabled:opacity-60"
+                          }
+                        >
+                          {skillPendingName === skill.name
+                            ? skillText.saving
+                            : skill.enabled
+                              ? skillText.enabled
+                              : skillText.disabled}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs leading-6 text-[var(--text-2)]">{skill.description}</p>
+                      <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-[var(--text-3)]">
+                        <span className="rounded-full border border-[var(--border)] px-2 py-1">
+                          {skill.configured ? skillText.configured : skillText.missing}
+                        </span>
+                        <span className="rounded-full border border-[var(--border)] px-2 py-1">
+                          {skillText.calls} {skill.stats.call_count ?? 0}
+                        </span>
+                        <span className="rounded-full border border-[var(--border)] px-2 py-1">
+                          {skillText.success} {skill.stats.success_count ?? 0}
+                        </span>
+                        <span className="rounded-full border border-[var(--border)] px-2 py-1">
+                          {skillText.failure} {skill.stats.failure_count ?? 0}
+                        </span>
+                        <span className="rounded-full border border-[var(--border)] px-2 py-1">
+                          {skillText.avgDuration} {Math.round(skill.stats.average_duration_ms ?? 0)} ms
+                        </span>
+                      </div>
+                      {skill.env_hints.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-[var(--text-3)]">
+                          <span className="text-[var(--text-3)]">{skillText.envHints}:</span>
+                          {skill.env_hints.map((hint) => (
+                            <span
+                              key={`${skill.name}-${hint}`}
+                              className="rounded-full border border-dashed border-[var(--border)] px-2 py-1"
+                            >
+                              {hint}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="mt-2 text-[11px] text-[var(--text-3)]">
+                        {skillText.lastUsed}: {formatUsageTimestamp(skill.stats.last_used_at ?? 0, locale)}
+                      </div>
+                    </div>
+                  ))}
+                  {skillCatalog && skillCatalog.skills.length === 0 && (
+                    <p className="text-sm text-[var(--text-3)]">{skillText.empty}</p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           <div className="mt-6 grid gap-5 md:grid-cols-2">

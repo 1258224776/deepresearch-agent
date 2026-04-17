@@ -12,6 +12,7 @@ python-dotenv
 pypdf
 python-docx
 pandas
+matplotlib
 faiss-cpu
 sentence-transformers
 anthropic

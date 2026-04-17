@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Clock3, FileText, Layers3, Loader2, Waypoints, X } from "lucide-react";
+import { AlertTriangle, Clock3, FileText, ImageIcon, Layers3, Loader2, Waypoints, X } from "lucide-react";
 
 import { useLocale } from "@/components/locale-provider";
 import type { ArtifactRecord, NodeResultRecord, RunState, RunSummary } from "@/lib/api";
@@ -37,6 +37,123 @@ function maybeFormatJson(content: string) {
   }
 }
 
+type MemoryHitItem = {
+  id?: string;
+  thread_id?: string;
+  thread_title?: string;
+  question?: string;
+  title?: string;
+  content?: string;
+  created_at?: number;
+  semantic_score?: number;
+  rank_score?: number;
+};
+
+type MemoryHitsPayload = {
+  count?: number;
+  items?: MemoryHitItem[];
+};
+
+type MemoryWritebackPayload = {
+  item_count?: number;
+  written_count?: number;
+  items?: string[];
+  error?: string;
+};
+
+function parseArtifactPayload<T>(content: string): T | null {
+  try {
+    return JSON.parse(content) as T;
+  } catch {
+    return null;
+  }
+}
+
+function formatScore(value: number | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "-";
+  }
+  return value.toFixed(2);
+}
+
+function MemoryHitsArtifact({ artifact }: { artifact: ArtifactRecord }) {
+  const payload = parseArtifactPayload<MemoryHitsPayload>(artifact.content);
+  const items = payload?.items ?? [];
+
+  if (items.length === 0) {
+    return (
+      <div className="border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-4 text-sm text-[var(--text-3)]">
+        No prior memory hits.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-4">
+      {items.map((item, index) => (
+        <div key={item.id || `${item.thread_id || "memory"}-${index}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-[var(--text-1)]">{item.thread_title || item.thread_id || "Unknown thread"}</div>
+            <div className="inline-flex items-center rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--accent)]">
+              Score {formatScore(item.rank_score ?? item.semantic_score)}
+            </div>
+          </div>
+          {(item.title || item.question) && (
+            <div className="mt-2 text-xs text-[var(--text-3)]">{item.title || item.question}</div>
+          )}
+          <p className="mt-2 text-sm leading-6 text-[var(--text-2)]">{item.content || "-"}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MemoryWritebackArtifact({ artifact }: { artifact: ArtifactRecord }) {
+  const payload = parseArtifactPayload<MemoryWritebackPayload>(artifact.content);
+  const items = payload?.items ?? [];
+  const itemCount = payload?.item_count ?? items.length;
+  const writtenCount = payload?.written_count ?? 0;
+
+  return (
+    <div className="space-y-3 border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-4">
+      <div className="flex flex-wrap gap-2">
+        <div className="inline-flex items-center rounded-full bg-[var(--surface)] px-3 py-1 text-[11px] font-semibold text-[var(--text-2)]">
+          Extracted {itemCount}
+        </div>
+        <div className="inline-flex items-center rounded-full bg-[#e8f6ef] px-3 py-1 text-[11px] font-semibold text-[#0f8a58]">
+          Written {writtenCount}
+        </div>
+      </div>
+      {payload?.error && (
+        <div className="rounded-2xl border border-[#f4d3cd] bg-[#fcedea] px-4 py-3 text-sm text-[var(--danger)]">
+          {payload.error}
+        </div>
+      )}
+      {items.length > 0 && (
+        <div className="space-y-2">
+          {items.map((item, index) => (
+            <div key={`${artifact.artifact_id}-item-${index}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm leading-6 text-[var(--text-2)]">
+              {item}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImageArtifact({ artifact }: { artifact: ArtifactRecord }) {
+  return (
+    <div className="border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-4">
+      <img
+        src={artifact.content}
+        alt={artifact.title || artifact.kind}
+        className="w-full rounded-2xl border border-[var(--border)] bg-white object-contain"
+      />
+    </div>
+  );
+}
+
 function useRunLabels() {
   const { text } = useLocale();
 
@@ -56,7 +173,13 @@ function useRunLabels() {
   }
 
   function routeLabel(routeKind: string) {
-    return routeKind === "planned_research" ? text.runs.routePlanned : text.runs.routeDirect;
+    if (routeKind === "planned_research") {
+      return text.runs.routePlanned;
+    }
+    if (routeKind === "code_research") {
+      return text.runs.routeCode;
+    }
+    return text.runs.routeDirect;
   }
 
   return { routeLabel, statusLabel };
@@ -113,10 +236,13 @@ function NodeCard({ nodeId, result }: { nodeId: string; result?: NodeResultRecor
 }
 
 function ArtifactCard({ artifact }: { artifact: ArtifactRecord }) {
+  const isImage = artifact.kind === "image_png" && artifact.content.startsWith("data:image/png;base64,");
+  const detailsOpen = artifact.kind === "report" || artifact.kind === "memory_hits" || isImage;
+
   return (
     <details
       className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]"
-      open={artifact.kind === "report"}
+      open={detailsOpen}
     >
       <summary className="cursor-pointer list-none px-4 py-3">
         <div className="flex items-center justify-between gap-3">
@@ -124,14 +250,26 @@ function ArtifactCard({ artifact }: { artifact: ArtifactRecord }) {
             <div className="text-sm font-semibold text-[var(--text-1)]">{artifact.title || artifact.kind}</div>
             <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-3)]">{artifact.kind}</div>
           </div>
-          <FileText className="size-4 text-[var(--text-3)]" />
+          {isImage ? (
+            <ImageIcon className="size-4 text-[var(--text-3)]" />
+          ) : (
+            <FileText className="size-4 text-[var(--text-3)]" />
+          )}
         </div>
       </summary>
-      <div className="border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-4">
-        <pre className="whitespace-pre-wrap text-xs leading-6 text-[var(--text-2)]">
-          {maybeFormatJson(artifact.content)}
-        </pre>
-      </div>
+      {artifact.kind === "memory_hits" ? (
+        <MemoryHitsArtifact artifact={artifact} />
+      ) : artifact.kind === "memory_writeback" ? (
+        <MemoryWritebackArtifact artifact={artifact} />
+      ) : isImage ? (
+        <ImageArtifact artifact={artifact} />
+      ) : (
+        <div className="border-t border-[var(--border)] bg-[var(--surface-2)] px-4 py-4">
+          <pre className="whitespace-pre-wrap text-xs leading-6 text-[var(--text-2)]">
+            {maybeFormatJson(artifact.content)}
+          </pre>
+        </div>
+      )}
     </details>
   );
 }

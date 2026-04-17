@@ -78,7 +78,7 @@ def _chunk_title(chunk: str, limit: int = MEMORY_TITLE_LIMIT) -> str:
     return candidate[:limit]
 
 
-def _split_answer_into_memory_items(answer: str) -> list[str]:
+def _split_answer_into_memory_items(answer: str, max_items: int = MEMORY_MAX_FACTS) -> list[str]:
     chunks = chunk_text(answer, chunk_size=MEMORY_CHUNK_SIZE, overlap=MEMORY_CHUNK_OVERLAP)
     if not chunks:
         single = _normalize_text(answer)
@@ -90,7 +90,36 @@ def _split_answer_into_memory_items(answer: str) -> list[str]:
         if len(normalized) < MEMORY_ITEM_MIN_LEN:
             continue
         items.append(normalized)
-        if len(items) >= MEMORY_MAX_FACTS:
+        if len(items) >= max(1, int(max_items)):
+            break
+    return items
+
+
+def extract_research_memory_items(answer: str, max_items: int = 5) -> list[str]:
+    normalized_answer = str(answer or "").strip()
+    if not normalized_answer:
+        return []
+
+    items: list[str] = []
+    seen: set[str] = set()
+
+    for block in re.split(r"\n\s*\n+", normalized_answer):
+        cleaned = re.sub(r"^\s{0,3}(?:[-*+]|\d+\.)\s+", "", block.strip(), flags=re.MULTILINE)
+        cleaned = re.sub(r"^\s{0,3}#{1,6}\s+", "", cleaned, flags=re.MULTILINE)
+        normalized = _normalize_text(cleaned)
+        if len(normalized) < MEMORY_ITEM_MIN_LEN or normalized in seen:
+            continue
+        seen.add(normalized)
+        items.append(normalized)
+        if len(items) >= max(1, int(max_items)):
+            return items
+
+    for item in _split_answer_into_memory_items(normalized_answer, max_items=max_items):
+        if item in seen:
+            continue
+        seen.add(item)
+        items.append(item)
+        if len(items) >= max(1, int(max_items)):
             break
     return items
 
@@ -230,12 +259,15 @@ def add_research_memory(
     answer: str,
     mode: str,
     source_message_ts: int,
+    items: list[str] | None = None,
+    metadata_extra: dict[str, Any] | None = None,
 ) -> int:
     if not _initialized:
         init_memory()
 
-    items = _split_answer_into_memory_items(answer)
-    if not items:
+    prepared_items = list(items) if items is not None else _split_answer_into_memory_items(answer)
+    extra_metadata = dict(metadata_extra or {})
+    if not prepared_items:
         return 0
 
     with _state_lock:
@@ -256,7 +288,7 @@ def add_research_memory(
 
             prepared: list[tuple[str, str, int, str, str, str, str, int, str]] = []
             fact_texts: list[str] = []
-            for position, content in enumerate(items, 1):
+            for position, content in enumerate(prepared_items, 1):
                 normalized = _normalize_text(content)
                 if not normalized or normalized in seen:
                     continue
@@ -268,6 +300,7 @@ def add_research_memory(
                     "kind": MEMORY_KIND_FACT,
                     "position": position,
                 }
+                metadata.update(extra_metadata)
                 prepared.append(
                     (
                         entry_id,

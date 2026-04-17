@@ -467,6 +467,69 @@ def test_api_key_auth_is_optional_and_applies_only_to_api_routes(api_client, mon
     assert authorized.status_code == 200
 
 
+def test_skill_catalog_returns_all_skills(
+    api_client,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    client, api, _ = api_client
+    import skills.config as skill_config
+    from skills.stats import record_skill_call
+
+    config_path = tmp_path / "skills_config.yaml"
+    monkeypatch.setattr(skill_config, "get_skills_config_path", lambda: config_path)
+    record_skill_call("search", success=True, duration_ms=12, db_path=api.DB_PATH)
+
+    response = client.get("/skills")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["total_skills"] > 0
+    assert payload["enabled_skills"] <= payload["total_skills"]
+    assert payload["categories"]
+    assert payload["profiles"]
+    assert all("stats" in item and "call_count" in item["stats"] for item in payload["skills"])
+
+    search_skill = next(item for item in payload["skills"] if item["name"] == "search")
+    assert search_skill["stats"]["call_count"] >= 1
+    assert "SEARCH_PROVIDERS" in search_skill["env_hints"]
+
+
+def test_patch_skill_toggles_enabled_state(
+    api_client,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    client, _, _ = api_client
+    import skills.config as skill_config
+
+    config_path = tmp_path / "skills_config.yaml"
+    monkeypatch.setattr(skill_config, "get_skills_config_path", lambda: config_path)
+
+    disabled = client.patch("/skills/search", json={"enabled": False})
+    assert disabled.status_code == 200
+    assert disabled.json()["name"] == "search"
+    assert disabled.json()["enabled"] is False
+
+    listed_after_disable = client.get("/skills")
+    assert listed_after_disable.status_code == 200
+    disabled_search = next(
+        item for item in listed_after_disable.json()["skills"] if item["name"] == "search"
+    )
+    assert disabled_search["enabled"] is False
+
+    enabled = client.patch("/skills/search", json={"enabled": True})
+    assert enabled.status_code == 200
+    assert enabled.json()["enabled"] is True
+
+    listed_after_enable = client.get("/skills")
+    assert listed_after_enable.status_code == 200
+    enabled_search = next(
+        item for item in listed_after_enable.json()["skills"] if item["name"] == "search"
+    )
+    assert enabled_search["enabled"] is True
+
+
 def test_graph_run_endpoints_persist_and_expose_state(api_client, monkeypatch: pytest.MonkeyPatch):
     client, api, _ = api_client
     thread_id = client.post("/api/threads", json={"title": "Graph thread"}).json()["id"]

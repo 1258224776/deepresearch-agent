@@ -23,3 +23,8 @@ service-account.json
 data/*.db
 data/*.faiss
 data/*.pkl
+
+# Local agent settings
+.claude/settings.json
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

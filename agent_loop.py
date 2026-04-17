@@ -7,8 +7,9 @@ the orchestration loop, finish signal, and report composition here.
 
 from __future__ import annotations
 
+import time
 import traceback
-from typing import Callable
+from typing import Any, Callable
 
 from pydantic import BaseModel, ValidationError, field_validator
 
@@ -22,6 +23,7 @@ from skills.config import get_enabled_skill_names
 from skills.guidance import get_guidance_for_skills
 from skills.profiles import DEFAULT_SKILL_PROFILE, get_profile_allowlist
 from skills.router import build_route_decision, check_loop, suggest_next_step
+from skills.stats import record_skill_calls
 
 
 MAX_PARSE_RETRIES = 2
@@ -91,6 +93,35 @@ class ReActAction(BaseModel):
 class _FinishSignal(Exception):
     def __init__(self, answer: str):
         self.answer = answer
+
+
+def _append_tool_metric(
+    tool_metrics: list[dict[str, Any]],
+    name: str,
+    *,
+    success: bool,
+    started_at: float,
+    error: str = "",
+) -> None:
+    if not name or name == FINISH_TOOL_NAME:
+        return
+    tool_metrics.append(
+        {
+            "skill_name": name,
+            "success": success,
+            "duration_ms": int((time.perf_counter() - started_at) * 1000),
+            "error": error,
+        }
+    )
+
+
+def _flush_tool_metrics(tool_metrics: list[dict[str, Any]]) -> None:
+    if not tool_metrics:
+        return
+    try:
+        record_skill_calls(tool_metrics)
+    except Exception:
+        pass
 
 
 def _run_tool(
@@ -285,6 +316,7 @@ def run_agent(
     """
     history: list[dict] = []
     observations: list[Observation] = []
+    tool_metrics: list[dict[str, Any]] = []
     if registry is None:
         registry = CitationRegistry()
     enabled_skills = get_enabled_skill_names(SKILL_REGISTRY.names())
@@ -442,6 +474,7 @@ def run_agent(
                     progress_callback(guard.warning or "⛔ 强制进入 finish")
 
             try:
+                tool_started_at = time.perf_counter()
                 obs = _run_tool(
                     action.tool,
                     action.args,
@@ -485,21 +518,27 @@ def run_agent(
                     "error": None,
                 }
             except SearchEmptyError as exc:
+                _append_tool_metric(tool_metrics, action.tool, success=False, started_at=tool_started_at, error=str(exc))
                 _append_error(history, action, f"[搜索为空] {exc}", "SearchEmptyError")
                 continue
             except ScrapeFailedError as exc:
+                _append_tool_metric(tool_metrics, action.tool, success=False, started_at=tool_started_at, error=str(exc))
                 _append_error(history, action, f"[抓取失败] {exc}", "ScrapeFailedError")
                 continue
             except RagNotReadyError as exc:
+                _append_tool_metric(tool_metrics, action.tool, success=False, started_at=tool_started_at, error=str(exc))
                 _append_error(history, action, f"[RAG 未就绪] {exc}", "RagNotReadyError")
                 continue
             except RateLimitError as exc:
+                _append_tool_metric(tool_metrics, action.tool, success=False, started_at=tool_started_at, error=str(exc))
                 _append_error(history, action, f"[限流] {exc}", "RateLimitError")
                 continue
             except AgentError as exc:
+                _append_tool_metric(tool_metrics, action.tool, success=False, started_at=tool_started_at, error=str(exc))
                 _append_error(history, action, f"[工具错误] {exc}", "AgentError")
                 continue
 
+            _append_tool_metric(tool_metrics, action.tool, success=True, started_at=tool_started_at)
             cite_ids = registry.add_many(obs.sources)
             obs.cite_ids = cite_ids
             observations.append(obs)
@@ -568,6 +607,8 @@ def run_agent(
             "step_count": len(history),
             "error": traceback.format_exc(),
         }
+    finally:
+        _flush_tool_metrics(tool_metrics)
 
 
 def _append_error(history: list[dict], action: ReActAction, msg: str, err_type: str) -> None:

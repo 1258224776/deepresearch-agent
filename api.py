@@ -37,7 +37,7 @@ from graph_runner import create_run_state, resume_static_graph, run_static_graph
 from run_state import ArtifactRecord, CheckpointRecord, NodeResult, RunState
 from skills import BUILTIN_SKILL_REGISTRY
 from skills.adapters import get_search_provider_catalog, get_search_provider_order, search_results_with_trace
-from skills.config import get_enabled_skill_names, get_skill_state_map
+from skills.config import get_enabled_skill_names, get_skill_state_map, set_skill_enabled
 from skills.profiles import (
     DEFAULT_SKILL_PROFILE,
     get_profile_allowlist,
@@ -45,6 +45,7 @@ from skills.profiles import (
     get_skill_profiles,
 )
 from skills.router import preview_route
+from skills.stats import get_skill_stats_map, init_skill_stats
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ RUN_EVENT_KEEPALIVE_SECONDS = 15.0
 async def lifespan(app: FastAPI):
     _init_db()
     memory.init_memory()
+    init_skill_stats(DB_PATH)
     yield
 
 # ----------------------------------------------------------------------
@@ -1092,6 +1094,7 @@ async def _run_graph_in_background(
         _publish_run_snapshot(persisted_final)
         final_content = _run_final_message_content(final_state)
         if final_content:
+            message_ts = int(final_state.context.get("final_message_ts") or time.time() * 1000)
             await _db_append_message(
                 final_state.thread_id,
                 {
@@ -1099,7 +1102,7 @@ async def _run_graph_in_background(
                     "content": final_content,
                     "mode": _run_mode_from_state(final_state),
                     "run_id": final_state.run_id,
-                    "ts": int(time.time() * 1000),
+                    "ts": message_ts,
                 },
             )
     except Exception as exc:
@@ -1204,6 +1207,7 @@ async def create_graph_run(thread_id: str, body: GraphRunRequest) -> RunState:
     state.context["engine"] = body.engine
     state.context["max_steps"] = body.max_steps
     state.context["use_planner"] = body.use_planner
+    state.context["thread_title"] = str(thread.get("title") or DEFAULT_THREAD_TITLE)
     state.updated_at = int(time.time() * 1000)
 
     await _db_append_message(
@@ -1667,6 +1671,13 @@ class SkillInfo(BaseModel):
     args_desc: dict[str, str] = Field(default_factory=dict)
     returns_sources: bool = True
     enabled: bool = True
+    configured: bool = True
+    env_hints: list[str] = Field(default_factory=list)
+    stats: dict[str, Any] = Field(default_factory=dict)
+
+
+class SkillStatePatchRequest(BaseModel):
+    enabled: bool
 
 
 class SkillProfileInfo(BaseModel):
@@ -1702,6 +1713,30 @@ class RoutePreviewResponse(BaseModel):
     signals: list[str] = Field(default_factory=list)
 
 
+_SEARCH_SKILL_ENV_HINT_NAMES = {
+    "search",
+    "search_company",
+    "search_docs",
+    "search_multi",
+    "search_news",
+    "search_recent",
+    "search_site",
+}
+
+
+def _search_skill_env_hints() -> list[str]:
+    hints = ["SEARCH_PROVIDERS"]
+    seen = set(hints)
+    for provider in get_search_provider_catalog():
+        for hint in provider.get("env_hints", []) or []:
+            normalized_hint = str(hint or "").strip()
+            if not normalized_hint or normalized_hint in seen:
+                continue
+            seen.add(normalized_hint)
+            hints.append(normalized_hint)
+    return hints
+
+
 def _build_references(observations: list[dict]) -> tuple[list[ReferenceInfo], str]:
     ref_map: dict[int, ReferenceInfo] = {}
     for obs in observations:
@@ -1725,15 +1760,51 @@ def _build_references(observations: list[dict]) -> tuple[list[ReferenceInfo], st
     return references, refs_md
 
 
+def _skill_runtime_metadata(skill_name: str) -> dict[str, Any]:
+    normalized_name = str(skill_name or "").strip()
+    if normalized_name == "rag_retrieve":
+        configured = bool(os.getenv("DEER_RAG_URL", "").strip())
+        if not configured:
+            try:
+                import rag
+
+                configured = bool(rag.is_ready())
+            except Exception:
+                configured = False
+        return {
+            "configured": configured,
+            "env_hints": [] if configured else ["DEER_RAG_URL"],
+        }
+    if normalized_name in _SEARCH_SKILL_ENV_HINT_NAMES:
+        return {
+            "configured": True,
+            "env_hints": _search_skill_env_hints(),
+        }
+
+    return {
+        "configured": True,
+        "env_hints": [],
+    }
+
+
 def _build_skill_catalog() -> SkillCatalogResponse:
-    enabled_map = get_skill_state_map(BUILTIN_SKILL_REGISTRY.names())
+    skill_names = BUILTIN_SKILL_REGISTRY.names()
+    enabled_map = get_skill_state_map(skill_names)
+    stats_map = get_skill_stats_map(skill_names, DB_PATH)
     skills_raw = BUILTIN_SKILL_REGISTRY.as_metadata_list(enabled_map=enabled_map)
+    enriched_skills: list[dict[str, Any]] = []
+    for item in skills_raw:
+        runtime = _skill_runtime_metadata(item["name"])
+        enriched = dict(item)
+        enriched.update(runtime)
+        enriched["stats"] = stats_map.get(item["name"], {})
+        enriched_skills.append(enriched)
     return SkillCatalogResponse(
-        total_skills=len(skills_raw),
-        enabled_skills=sum(1 for s in skills_raw if s["enabled"]),
-        categories=sorted({s["category"] for s in skills_raw}),
-        profiles=[SkillProfileInfo(**p) for p in get_profile_metadata_list([s["name"] for s in skills_raw if s["enabled"]])],
-        skills=[SkillInfo(**s) for s in skills_raw],
+        total_skills=len(enriched_skills),
+        enabled_skills=sum(1 for s in enriched_skills if s["enabled"]),
+        categories=sorted({s["category"] for s in enriched_skills}),
+        profiles=[SkillProfileInfo(**p) for p in get_profile_metadata_list([s["name"] for s in enriched_skills if s["enabled"]])],
+        skills=[SkillInfo(**s) for s in enriched_skills],
     )
 
 
@@ -1752,6 +1823,19 @@ def health() -> dict:
 @app.get("/skills", response_model=SkillCatalogResponse)
 def list_skills() -> SkillCatalogResponse:
     return _build_skill_catalog()
+
+
+@app.patch("/skills/{skill_name}", response_model=SkillInfo)
+def patch_skill(skill_name: str, body: SkillStatePatchRequest) -> SkillInfo:
+    normalized_name = skill_name.strip()
+    if not BUILTIN_SKILL_REGISTRY.has(normalized_name):
+        raise HTTPException(status_code=404, detail="skill not found")
+    set_skill_enabled(normalized_name, body.enabled)
+    catalog = _build_skill_catalog()
+    for item in catalog.skills:
+        if item.name == normalized_name:
+            return item
+    raise HTTPException(status_code=500, detail="updated skill not found in catalog")
 
 
 @app.post("/skills/route-preview", response_model=RoutePreviewResponse)

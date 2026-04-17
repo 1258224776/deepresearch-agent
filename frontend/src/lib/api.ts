@@ -225,6 +225,46 @@ export interface SearchDiagnostics {
   results: SearchDiagnosticsResult[];
 }
 
+export interface SkillStats {
+  call_count: number;
+  success_count: number;
+  failure_count: number;
+  total_duration_ms: number;
+  average_duration_ms: number;
+  last_used_at: number;
+  last_status: string;
+  last_error: string;
+}
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  category: string;
+  required_args: string[];
+  optional_args: string[];
+  args_desc: Record<string, string>;
+  returns_sources: boolean;
+  enabled: boolean;
+  configured: boolean;
+  env_hints: string[];
+  stats: SkillStats;
+}
+
+export interface SkillProfileInfo {
+  name: string;
+  description: string;
+  allowed_skills: string[];
+  allowed_count: number;
+}
+
+export interface SkillCatalog {
+  total_skills: number;
+  enabled_skills: number;
+  categories: string[];
+  profiles: SkillProfileInfo[];
+  skills: SkillInfo[];
+}
+
 type RawMessage = Omit<Message, "runId"> & {
   run_id?: string;
   runId?: string;
@@ -367,6 +407,26 @@ export async function getSearchProviders(): Promise<SearchProviderCatalog> {
   const res = await request(`/api/search/providers`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`getSearchProviders: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getSkillCatalog(): Promise<SkillCatalog> {
+  const res = await request(`/skills`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`getSkillCatalog: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function setSkillEnabled(name: string, enabled: boolean): Promise<SkillInfo> {
+  const res = await request(`/skills/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    throw new Error(`setSkillEnabled: ${res.status}`);
   }
   return res.json();
 }
