@@ -71,7 +71,7 @@ CHAT_SYSTEM_PROMPT = (
 )
 API_ALLOWED_ORIGINS_RAW = os.getenv(
     "API_ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:3001",
+    "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001",
 )
 API_ACCESS_KEY = (os.getenv("DEEPRESEARCH_API_KEY", "") or os.getenv("API_KEY", "")).strip()
 
