@@ -414,6 +414,13 @@ def _memory_mode_from_state(state: RunState) -> str:
     return "planner" if bool(state.context.get("use_planner", state.route_kind == "planned_research")) else "research"
 
 
+def _question_with_uploaded_attachments(state: RunState, question: str) -> str:
+    attachment_prompt = str(state.context.get("uploaded_attachment_prompt", "") or "").strip()
+    if not attachment_prompt:
+        return question
+    return f"{question}\n\n{attachment_prompt}"
+
+
 def _persist_report_memory(
     state: RunState,
     *,
@@ -766,9 +773,9 @@ class PlannerNode:
             preferred_thread_id=self._preferred_thread_id,
             created_by=self.node_id,
         )
-        planning_question = state.question
+        planning_question = _question_with_uploaded_attachments(state, state.question)
         if memory_context:
-            planning_question = f"{memory_context}\n\n## Current research task\n{state.question}"
+            planning_question = f"{memory_context}\n\n## Current research task\n{planning_question}"
 
         plan = _plan_research(planning_question, self._engine)
         state.context["planner_memory_context"] = memory_context
@@ -850,11 +857,11 @@ class ResearcherNode:
         question = sub_q
         if findings_context:
             question = f"{findings_context}\n\n## Current sub-question\n{sub_q}"
-        return question, planner_context
+        return _question_with_uploaded_attachments(state, question), planner_context
 
     def build_request(self, state: RunState) -> tuple[str, str | None, QuestionType | None]:
         if self.node_id == "researcher":
-            question = state.question
+            question = _question_with_uploaded_attachments(state, state.question)
             _, resolved_context, _ = _ensure_run_memory_context(
                 state,
                 query=state.question,

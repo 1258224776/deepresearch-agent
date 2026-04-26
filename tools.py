@@ -230,6 +230,10 @@ def parse_uploaded_file(file_bytes: bytes, filename: str) -> str:
     支持：PDF、DOCX、TXT、CSV、MD
     """
     ext = filename.rsplit(".", 1)[-1].lower()
+    text_like_extensions = {
+        "txt", "md", "py", "js", "jsx", "ts", "tsx", "json",
+        "yaml", "yml", "html", "css", "sql", "sh", "xml",
+    }
     try:
         if ext == "pdf":
             try:
@@ -257,7 +261,7 @@ def parse_uploaded_file(file_bytes: bytes, filename: str) -> str:
             except ImportError:
                 return file_bytes.decode("utf-8", errors="ignore")[:10000]
 
-        elif ext in ("txt", "md"):
+        elif ext in text_like_extensions:
             return file_bytes.decode("utf-8", errors="ignore")[:20000]
 
         else:

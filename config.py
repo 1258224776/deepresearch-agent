@@ -249,6 +249,8 @@ def get_effective_role_order(role: str, engine: str = "") -> str:
     preset = ENGINE_PRESETS.get(engine, {})
     if preset.get(role, ""):
         return preset.get(role, "")
+    if engine and engine in PROVIDERS:
+        return engine
     runtime = get_runtime_role_order(role)
     if runtime:
         return runtime

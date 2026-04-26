@@ -33,6 +33,22 @@ async function request(path: string, init?: RequestInit) {
   throw new Error(`API unreachable at ${target}`);
 }
 
+async function responseDetail(response: Response): Promise<string> {
+  const raw = await response.text();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail;
+    }
+  } catch {
+    // fall through to raw body
+  }
+  return raw;
+}
+
 async function requestWithPathFallback(paths: string[], init?: RequestInit) {
   let lastResponse: Response | null = null;
 
@@ -62,6 +78,15 @@ export interface Reference {
   snippet: string;
 }
 
+export interface UploadedAttachment {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: number;
+  text_preview?: string;
+}
+
 export interface Step {
   thought: string;
   tool: string;
@@ -78,6 +103,7 @@ export interface Message {
   mode?: ThreadMode;
   steps?: Step[];
   references?: Reference[];
+  attachments?: UploadedAttachment[];
   ts?: number;
   runId?: string;
 }
@@ -195,6 +221,22 @@ export interface SearchProviderCatalog {
   providers: SearchProviderInfo[];
 }
 
+export interface EnginePresetInfo {
+  name: string;
+  roles: string[];
+}
+
+export interface EngineProviderInfo {
+  name: string;
+  model: string;
+  configured: boolean;
+}
+
+export interface EngineCatalog {
+  presets: EnginePresetInfo[];
+  providers: EngineProviderInfo[];
+}
+
 export interface SearchProviderAttempt {
   provider: string;
   configured: boolean;
@@ -306,6 +348,41 @@ export async function createThread(title = "New chat"): Promise<Thread> {
   return normalizeThread(await res.json());
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+    reader.onload = () => {
+      const result = String(reader.result ?? "");
+      const encoded = result.split(",", 2)[1] ?? "";
+      if (!encoded) {
+        reject(new Error(`Failed to encode ${file.name}`));
+        return;
+      }
+      resolve(encoded);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function uploadAttachment(file: File): Promise<UploadedAttachment> {
+  const data_base64 = await fileToBase64(file);
+  const res = await request(`/api/uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filename: file.name,
+      content_type: file.type,
+      data_base64,
+    }),
+  });
+  if (!res.ok) {
+    const detail = await responseDetail(res);
+    throw new Error(detail || `uploadAttachment: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function listThreads(limit = 50): Promise<Thread[]> {
   const res = await request(`/api/threads?limit=${limit}`, { cache: "no-store" });
   if (!res.ok) {
@@ -334,7 +411,7 @@ export async function listThreadRuns(threadId: string, limit = 20): Promise<RunS
 export async function createGraphRun(
   threadId: string,
   content: string,
-  options: Pick<RunOptions, "engine" | "maxSteps" | "usePlanner"> = {},
+  options: Pick<RunOptions, "engine" | "maxSteps" | "usePlanner" | "attachments"> = {},
 ): Promise<RunState> {
   const res = await request(`/api/threads/${threadId}/runs`, {
     method: "POST",
@@ -344,6 +421,7 @@ export async function createGraphRun(
       engine: options.engine ?? "",
       max_steps: options.maxSteps ?? 8,
       use_planner: options.usePlanner ?? false,
+      attachments: (options.attachments ?? []).map((item) => item.id),
     }),
   });
   if (!res.ok) {
@@ -407,6 +485,14 @@ export async function getSearchProviders(): Promise<SearchProviderCatalog> {
   const res = await request(`/api/search/providers`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`getSearchProviders: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getEngineCatalog(): Promise<EngineCatalog> {
+  const res = await request(`/api/ai/engines`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`getEngineCatalog: ${res.status}`);
   }
   return res.json();
 }
@@ -564,11 +650,16 @@ export async function* chatStream(
   threadId: string,
   content: string,
   engine = "",
+  attachments: UploadedAttachment[] = [],
 ): AsyncGenerator<SSEEvent> {
   const response = await request(`/api/threads/${threadId}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, engine }),
+    body: JSON.stringify({
+      content,
+      engine,
+      attachments: attachments.map((item) => item.id),
+    }),
   });
   if (!response.ok) {
     throw new Error(`chatStream: ${response.status}`);
@@ -581,6 +672,7 @@ export interface RunOptions {
   maxSteps?: number;
   skillProfile?: string;
   usePlanner?: boolean;
+  attachments?: UploadedAttachment[];
 }
 
 export async function* runThreadStream(
@@ -602,6 +694,7 @@ export async function* runThreadStream(
       max_steps: options.maxSteps ?? 8,
       skill_profile: options.skillProfile ?? "react_default",
       use_planner: options.usePlanner ?? false,
+      attachments: (options.attachments ?? []).map((item) => item.id),
     }),
     },
   );

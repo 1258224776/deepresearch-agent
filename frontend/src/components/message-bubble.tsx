@@ -1,11 +1,45 @@
 "use client";
 
-import { Bot, Sparkles, Waypoints } from "lucide-react";
+import { Bot, Paperclip, Sparkles, Waypoints } from "lucide-react";
 
 import { useLocale } from "@/components/locale-provider";
 import { StepTrace } from "@/components/step-trace";
 import type { Message, Step } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+function AttachmentChips({
+  attachments,
+  variant = "surface",
+}: {
+  attachments?: Message["attachments"];
+  variant?: "surface" | "accent";
+}) {
+  if (!attachments?.length) {
+    return null;
+  }
+
+  const chipClass =
+    variant === "accent"
+      ? "border-white/20 bg-white/10 text-white"
+      : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)]";
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {attachments.map((attachment) => (
+        <span
+          key={attachment.id}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-medium",
+            chipClass,
+          )}
+        >
+          <Paperclip className="size-3" />
+          <span className="max-w-[12rem] truncate">{attachment.filename}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function escapeHtml(input: string) {
   return input
@@ -67,6 +101,7 @@ export function MessageBubble({
       <div className="flex justify-end">
         <div className="max-w-3xl rounded-[24px] rounded-br-md bg-[var(--accent)] px-4 py-3 text-sm leading-7 text-white shadow-[var(--shadow-sm)]">
           {message.content}
+          <AttachmentChips attachments={message.attachments} variant="accent" />
         </div>
       </div>
     );
@@ -103,6 +138,7 @@ export function MessageBubble({
           className="prose-warm max-w-none text-sm leading-7 text-[var(--text-1)]"
           dangerouslySetInnerHTML={{ __html: renderMarkdown(message.content) }}
         />
+        <AttachmentChips attachments={message.attachments} />
         {!!message.steps?.length && <StepTrace steps={message.steps} />}
       </div>
     </div>

@@ -7,7 +7,7 @@ import { ChatStream } from "@/components/chat-stream";
 import { InputBox, type SendMode } from "@/components/input-box";
 import { useLocale } from "@/components/locale-provider";
 import { WorkspaceShell } from "@/components/workspace-shell";
-import { createThread } from "@/lib/api";
+import { createThread, type UploadedAttachment } from "@/lib/api";
 
 const DRAFT_PREFIX = "deepresearch:draft:";
 
@@ -18,12 +18,19 @@ export default function HomePage() {
   const [composerMode, setComposerMode] = useState<SendMode>("chat");
   const [errorMessage, setErrorMessage] = useState("");
 
-  async function handleSend(content: string, mode: SendMode) {
+  async function handleSend(
+    content: string,
+    mode: SendMode,
+    attachments: UploadedAttachment[],
+  ) {
     setCreating(true);
     setErrorMessage("");
     try {
       const thread = await createThread(text.sidebar.newChat);
-      sessionStorage.setItem(`${DRAFT_PREFIX}${thread.id}`, JSON.stringify({ content, mode }));
+      sessionStorage.setItem(
+        `${DRAFT_PREFIX}${thread.id}`,
+        JSON.stringify({ content, mode, attachments }),
+      );
       window.dispatchEvent(new Event("threads:changed"));
       router.push(`/chat/${thread.id}`);
     } catch (error) {
@@ -35,7 +42,7 @@ export default function HomePage() {
   }
 
   function handleSuggestionClick(suggestion: string) {
-    void handleSend(suggestion, composerMode);
+    void handleSend(suggestion, composerMode, []);
   }
 
   return (

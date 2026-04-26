@@ -7,9 +7,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocale } from "@/components/locale-provider";
 import { useSettings } from "@/components/settings-provider";
 import {
+  getEngineCatalog,
   getSkillCatalog,
   getSearchDiagnostics,
   getSearchProviders,
+  type EngineCatalog,
   type SearchDiagnostics,
   type SearchProviderCatalog,
   type SkillCatalog,
@@ -20,6 +22,16 @@ import { DEFAULT_API_BASE, DEFAULT_APP_SETTINGS, type AppSettings } from "@/lib/
 
 type SettingsDialogProps = {
   triggerClassName?: string;
+};
+
+type SelectOption = {
+  value: string;
+  label: string;
+};
+
+type SelectGroup = {
+  label?: string;
+  options: SelectOption[];
 };
 
 function Field({
@@ -49,6 +61,70 @@ function Field({
   );
 }
 
+function SelectField({
+  label,
+  hint,
+  value,
+  onChange,
+  groups,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  onChange: (value: string) => void;
+  groups: SelectGroup[];
+}) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-sm font-medium text-[var(--text-1)]">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 w-full cursor-pointer rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 text-sm text-[var(--text-1)] outline-none transition focus:border-[var(--accent)]"
+      >
+        {groups.map((group, groupIndex) =>
+          group.label ? (
+            <optgroup key={group.label} label={group.label}>
+              {group.options.map((option) => (
+                <option key={`${group.label}-${option.value}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
+          ) : (
+            group.options.map((option) => (
+              <option key={`plain-${groupIndex}-${option.value}`} value={option.value}>
+                {option.label}
+              </option>
+            ))
+          ),
+        )}
+      </select>
+      <span className="text-xs leading-5 text-[var(--text-3)]">{hint}</span>
+    </label>
+  );
+}
+
+function withSavedCustomValue(groups: SelectGroup[], value: string, label: string): SelectGroup[] {
+  const currentValue = value.trim();
+  if (!currentValue) {
+    return groups;
+  }
+  const exists = groups.some((group) =>
+    group.options.some((option) => option.value === currentValue),
+  );
+  if (exists) {
+    return groups;
+  }
+  return [
+    {
+      label,
+      options: [{ value: currentValue, label: currentValue }],
+    },
+    ...groups,
+  ];
+}
+
 function formatUsageTimestamp(timestamp: number, locale: "zh" | "en") {
   if (!timestamp) {
     return "-";
@@ -71,6 +147,8 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<AppSettings>(settings);
+  const [engineCatalog, setEngineCatalog] = useState<EngineCatalog | null>(null);
+  const [engineError, setEngineError] = useState("");
   const [providerCatalog, setProviderCatalog] = useState<SearchProviderCatalog | null>(null);
   const [providerError, setProviderError] = useState("");
   const [skillCatalog, setSkillCatalog] = useState<SkillCatalog | null>(null);
@@ -137,6 +215,33 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
       return undefined;
     }
 
+    async function loadEngines() {
+      try {
+        const data = await getEngineCatalog();
+        if (!cancelled) {
+          setEngineCatalog(data);
+          setEngineError("");
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEngineCatalog(null);
+          setEngineError(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+
+    void loadEngines();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, settings.apiBase]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!open) {
+      return undefined;
+    }
+
     async function loadProviders() {
       try {
         const data = await getSearchProviders();
@@ -184,6 +289,99 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
       cancelled = true;
     };
   }, [open, settings.apiBase]);
+
+  const baseEngineGroups = useMemo<SelectGroup[]>(() => {
+    const presetNames = engineCatalog?.presets.length
+      ? engineCatalog.presets.map((preset) => preset.name)
+      : ["deep", "fast"];
+    const presetOptions = presetNames.map((name) => ({
+      value: name,
+      label:
+        name === "deep"
+          ? text.settings.engineDeepOption
+          : name === "fast"
+            ? text.settings.engineFastOption
+            : name,
+    }));
+    const providerOptions = [...(engineCatalog?.providers ?? [])]
+      .sort((left, right) => {
+        if (left.configured !== right.configured) {
+          return Number(right.configured) - Number(left.configured);
+        }
+        return left.name.localeCompare(right.name);
+      })
+      .map((provider) => ({
+        value: provider.name,
+        label: provider.configured
+          ? `${provider.name} · ${provider.model}`
+          : `${provider.name} · ${provider.model} (${providerText.missing})`,
+      }));
+    const groups: SelectGroup[] = [
+      {
+        options: [{ value: "", label: text.settings.engineDefaultOption }],
+      },
+    ];
+    if (presetOptions.length) {
+      groups.push({
+        label: text.settings.enginePresetGroup,
+        options: presetOptions,
+      });
+    }
+    if (providerOptions.length) {
+      groups.push({
+        label: text.settings.engineProviderGroup,
+        options: providerOptions,
+      });
+    }
+    return groups;
+  }, [
+    engineCatalog,
+    providerText.missing,
+    text.settings.engineDeepOption,
+    text.settings.engineDefaultOption,
+    text.settings.engineFastOption,
+    text.settings.enginePresetGroup,
+    text.settings.engineProviderGroup,
+  ]);
+
+  const profileGroups = useMemo<SelectGroup[]>(() => {
+    const options = new Map<string, SelectOption>();
+    for (const name of [
+      DEFAULT_APP_SETTINGS.researchProfile,
+      "web_research_heavy",
+      DEFAULT_APP_SETTINGS.plannerProfile,
+    ]) {
+      options.set(name, { value: name, label: name });
+    }
+    for (const profile of skillCatalog?.profiles ?? []) {
+      options.set(profile.name, {
+        value: profile.name,
+        label: profile.description ? `${profile.name} · ${profile.description}` : profile.name,
+      });
+    }
+    return [{ options: [...options.values()] }];
+  }, [skillCatalog]);
+
+  const chatEngineGroups = useMemo(
+    () => withSavedCustomValue(baseEngineGroups, draft.chatEngine, text.settings.savedCustomOption),
+    [baseEngineGroups, draft.chatEngine, text.settings.savedCustomOption],
+  );
+  const researchEngineGroups = useMemo(
+    () => withSavedCustomValue(baseEngineGroups, draft.researchEngine, text.settings.savedCustomOption),
+    [baseEngineGroups, draft.researchEngine, text.settings.savedCustomOption],
+  );
+  const plannerEngineGroups = useMemo(
+    () => withSavedCustomValue(baseEngineGroups, draft.plannerEngine, text.settings.savedCustomOption),
+    [baseEngineGroups, draft.plannerEngine, text.settings.savedCustomOption],
+  );
+  const researchProfileGroups = useMemo(
+    () => withSavedCustomValue(profileGroups, draft.researchProfile, text.settings.savedCustomOption),
+    [draft.researchProfile, profileGroups, text.settings.savedCustomOption],
+  );
+  const plannerProfileGroups = useMemo(
+    () => withSavedCustomValue(profileGroups, draft.plannerProfile, text.settings.savedCustomOption),
+    [draft.plannerProfile, profileGroups, text.settings.savedCustomOption],
+  );
 
   function updateField<Key extends keyof AppSettings>(key: Key, value: AppSettings[Key]) {
     setDraft((current) => ({
@@ -276,8 +474,8 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
       </Dialog.Trigger>
 
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-[#2f261f]/24 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(720px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-[var(--border)] bg-[var(--surface)] p-6 shadow-[var(--shadow-lg)]">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-[#2f261f]/24 backdrop-blur-sm data-[state=open]:animate-[settings-overlay-in_180ms_ease-out] data-[state=closed]:animate-[settings-overlay-out_140ms_ease-in]" />
+        <Dialog.Content className="fixed inset-y-0 right-0 z-50 h-dvh w-full max-w-[min(720px,calc(100vw-0.75rem))] overflow-y-auto border-l border-[var(--border)] bg-[var(--surface)] p-6 shadow-[-24px_0_60px_rgba(37,24,18,0.14)] outline-none data-[state=open]:animate-[settings-drawer-in_220ms_cubic-bezier(0.16,1,0.3,1)] data-[state=closed]:animate-[settings-drawer-out_180ms_cubic-bezier(0.4,0,1,1)] sm:rounded-l-[28px]">
           <div className="flex items-start justify-between gap-4">
             <div>
               <Dialog.Title className="text-lg font-semibold text-[var(--text-1)]">
@@ -299,8 +497,13 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
           </div>
 
           <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]">
-              {text.settings.status}
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]">
+                {text.settings.status}
+              </div>
+              <span className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-3)]">
+                {text.settings.readOnly}
+              </span>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-[var(--text-2)]">
               <span className="rounded-full bg-[var(--surface)] px-3 py-1 text-[var(--text-1)]">
@@ -564,9 +767,17 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
             )}
           </div>
 
-          <div className="mt-6 grid gap-5 md:grid-cols-2">
-            <div className="md:col-span-2">
-              <Field
+          <div className="mt-6 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-3)]">
+              {text.settings.editableTitle}
+            </div>
+            <p className="mt-2 text-xs leading-6 text-[var(--text-3)]">{text.settings.editableHint}</p>
+            {engineError ? (
+              <p className="mt-3 text-xs leading-6 text-[var(--danger)]">{engineError}</p>
+            ) : null}
+            <div className="mt-5 grid gap-5 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <Field
                 label={text.settings.apiBase}
                 hint={text.settings.apiBaseHint}
                 value={draft.apiBase}
@@ -589,36 +800,42 @@ export function SettingsDialog({ triggerClassName = "" }: SettingsDialogProps) {
               />
             </div>
 
-            <Field
+            <SelectField
               label={text.settings.chatEngine}
               hint={text.settings.chatEngineHint}
               value={draft.chatEngine}
               onChange={(value) => updateField("chatEngine", value)}
+              groups={chatEngineGroups}
             />
-            <Field
+            <SelectField
               label={text.settings.researchEngine}
               hint={text.settings.researchEngineHint}
               value={draft.researchEngine}
               onChange={(value) => updateField("researchEngine", value)}
+              groups={researchEngineGroups}
             />
-            <Field
+            <SelectField
               label={text.settings.plannerEngine}
               hint={text.settings.plannerEngineHint}
               value={draft.plannerEngine}
               onChange={(value) => updateField("plannerEngine", value)}
+              groups={plannerEngineGroups}
             />
-            <Field
+            <SelectField
               label={text.settings.researchProfile}
               hint={text.settings.researchProfileHint}
               value={draft.researchProfile}
               onChange={(value) => updateField("researchProfile", value)}
+              groups={researchProfileGroups}
             />
-            <Field
+            <SelectField
               label={text.settings.plannerProfile}
               hint={text.settings.plannerProfileHint}
               value={draft.plannerProfile}
               onChange={(value) => updateField("plannerProfile", value)}
+              groups={plannerProfileGroups}
             />
+            </div>
           </div>
 
           <div className="mt-8 flex items-center justify-between gap-3">

@@ -22,6 +22,7 @@ import {
   type RunSummary,
   type Step,
   type Thread,
+  type UploadedAttachment,
 } from "@/lib/api";
 
 const DRAFT_PREFIX = "deepresearch:draft:";
@@ -247,7 +248,7 @@ export default function ThreadPage() {
   );
 
   const handleSend = useCallback(
-    async (content: string, mode: SendMode) => {
+    async (content: string, mode: SendMode, attachments: UploadedAttachment[] = []) => {
       if (!threadId) {
         return;
       }
@@ -255,6 +256,7 @@ export default function ThreadPage() {
       const optimisticUser: Message = {
         role: "user",
         content,
+        attachments,
         mode,
         ts: Date.now(),
       };
@@ -273,7 +275,7 @@ export default function ThreadPage() {
           let finalReferences: Reference[] | undefined;
           let collectedSteps: Step[] = [];
 
-          const stream = chatStream(threadId, content, settings.chatEngine);
+          const stream = chatStream(threadId, content, settings.chatEngine, attachments);
           for await (const event of stream) {
             if (event.type === "text_delta") {
               finalContent += event.delta;
@@ -337,6 +339,7 @@ export default function ThreadPage() {
           engine: mode === "planner" ? settings.plannerEngine : settings.researchEngine,
           maxSteps: 8,
           usePlanner: mode === "planner",
+          attachments,
         });
 
         upsertRunState(run);
@@ -389,10 +392,14 @@ export default function ThreadPage() {
     sessionStorage.removeItem(`${DRAFT_PREFIX}${threadId}`);
 
     try {
-      const draft = JSON.parse(raw) as { content?: string; mode?: SendMode };
+      const draft = JSON.parse(raw) as {
+        content?: string;
+        mode?: SendMode;
+        attachments?: UploadedAttachment[];
+      };
       if (draft.content?.trim()) {
         setComposerMode(draft.mode ?? "chat");
-        void handleSend(draft.content, draft.mode ?? "chat");
+        void handleSend(draft.content, draft.mode ?? "chat", draft.attachments ?? []);
       }
     } catch {
       // ignore malformed draft payload
@@ -400,7 +407,7 @@ export default function ThreadPage() {
   }, [handleSend, loadingThread, threadId]);
 
   function handleSuggestionClick(suggestion: string) {
-    void handleSend(suggestion, composerMode);
+    void handleSend(suggestion, composerMode, []);
   }
 
   const subtitle = useMemo(() => {

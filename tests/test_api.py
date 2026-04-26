@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import threading
@@ -252,6 +253,48 @@ def test_chat_stream_persists_messages(api_client, monkeypatch: pytest.MonkeyPat
     detail = client.get(f"/api/threads/{thread_id}").json()
     assert [msg["role"] for msg in detail["messages"]] == ["user", "assistant"]
     assert detail["messages"][-1]["content"] == "hello back"
+
+
+def test_chat_stream_with_attachment_includes_uploaded_context(api_client, monkeypatch: pytest.MonkeyPatch):
+    client, _, _ = api_client
+    thread_id = client.post("/api/threads", json={"title": "Attachment chat"}).json()["id"]
+
+    upload = client.post(
+        "/api/uploads",
+        json={
+            "filename": "notes.txt",
+            "content_type": "text/plain",
+            "data_base64": base64.b64encode("Revenue grew 20% year over year.".encode("utf-8")).decode("ascii"),
+        },
+    )
+    assert upload.status_code == 200
+    attachment = upload.json()
+
+    import agent
+
+    captured: dict[str, str] = {}
+
+    def fake_ai_generate_role(prompt, *args, **kwargs):
+        captured["prompt"] = prompt
+        return "attachment answer"
+
+    monkeypatch.setattr(agent, "ai_generate_role", fake_ai_generate_role)
+
+    response = client.post(
+        f"/api/threads/{thread_id}/chat",
+        json={
+            "content": "Summarize the uploaded note",
+            "engine": "",
+            "attachments": [attachment["id"]],
+        },
+    )
+    assert response.status_code == 200
+    assert "Attachment 1: notes.txt" in captured["prompt"]
+    assert "Revenue grew 20% year over year." in captured["prompt"]
+
+    detail = client.get(f"/api/threads/{thread_id}").json()
+    assert detail["messages"][0]["attachments"][0]["id"] == attachment["id"]
+    assert detail["messages"][0]["attachments"][0]["filename"] == "notes.txt"
 
 
 def test_research_stream_returns_steps_and_memory_hits(api_client, monkeypatch: pytest.MonkeyPatch):
@@ -578,6 +621,56 @@ def test_graph_run_endpoints_persist_and_expose_state(api_client, monkeypatch: p
     checkpoints = client.get(f"/api/runs/{run_id}/checkpoints")
     assert checkpoints.status_code == 200
     assert checkpoints.json()[0]["node_id"] == "coordinator"
+
+
+def test_graph_run_with_attachment_persists_context(api_client, monkeypatch: pytest.MonkeyPatch):
+    client, api, _ = api_client
+    thread_id = client.post("/api/threads", json={"title": "Graph attachment thread"}).json()["id"]
+
+    upload = client.post(
+        "/api/uploads",
+        json={
+            "filename": "brief.md",
+            "content_type": "text/markdown",
+            "data_base64": base64.b64encode("# Brief\nTesla margin pressure.".encode("utf-8")).decode("ascii"),
+        },
+    )
+    assert upload.status_code == 200
+    attachment = upload.json()
+
+    captured: dict[str, str] = {}
+
+    def fake_run_static_graph(**kwargs):
+        state = kwargs["state"]
+        captured["prompt"] = str(state.context.get("uploaded_attachment_prompt", ""))
+        return _build_fake_run_state(
+            thread_id=state.thread_id,
+            question=state.question,
+            run_id=state.run_id,
+            route_kind="direct_research",
+        )
+
+    monkeypatch.setattr(api, "run_static_graph", fake_run_static_graph)
+
+    created = client.post(
+        f"/api/threads/{thread_id}/runs",
+        json={
+            "content": "Analyze Tesla",
+            "engine": "",
+            "max_steps": 8,
+            "use_planner": False,
+            "attachments": [attachment["id"]],
+        },
+    )
+    assert created.status_code == 200
+
+    run_id = created.json()["run_id"]
+    _wait_for_run_status(client, run_id, "done")
+    assert "Attachment 1: brief.md" in captured["prompt"]
+    assert "Tesla margin pressure." in captured["prompt"]
+
+    detail = client.get(f"/api/threads/{thread_id}").json()
+    assert detail["messages"][0]["attachments"][0]["id"] == attachment["id"]
 
 
 def test_graph_run_resume_reuses_run_id(api_client, monkeypatch: pytest.MonkeyPatch):

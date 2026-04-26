@@ -204,7 +204,7 @@ def ai_generate_role(prompt: str, system: str = "",
                      structured: bool = False) -> str:
     """
     按角色 + 引擎预设路由选择提供商列表，再调用 ai_generate。
-    engine: "deep" | "fast" | "" (空=用默认 ROLE_ORDER)
+    engine: "deep" | "fast" | provider alias | "" (空=用默认 ROLE_ORDER)
     """
     order_str = get_effective_role_order(role, engine)
     if not order_str:

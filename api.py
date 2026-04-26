@@ -10,6 +10,7 @@ Endpoints are split into two groups:
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -31,9 +32,11 @@ from pydantic import BaseModel, Field
 
 import memory
 import run_store
+from config import ENGINE_PRESETS, PROVIDERS, load_secret
 from agent_loop import run_agent
 from agent_planner import run_planner_agent
 from graph_runner import create_run_state, resume_static_graph, run_static_graph
+from runtime_adapters import parse_uploaded_document
 from run_state import ArtifactRecord, CheckpointRecord, NodeResult, RunState
 from skills import BUILTIN_SKILL_REGISTRY
 from skills.adapters import get_search_provider_catalog, get_search_provider_order, search_results_with_trace
@@ -91,6 +94,15 @@ _run_event_subscribers: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _run_event_lock = threading.Lock()
 TERMINAL_RUN_STATUSES = {"done", "failed"}
 RUN_EVENT_KEEPALIVE_SECONDS = 15.0
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+MAX_ATTACHMENT_COUNT = 5
+SUPPORTED_UPLOAD_EXTENSIONS = {
+    "pdf", "docx", "txt", "md", "csv",
+    "py", "js", "jsx", "ts", "tsx", "json",
+    "yaml", "yml", "html", "css", "sql", "sh", "xml",
+}
+ATTACHMENT_PROMPT_CHAR_LIMIT = 32000
+ATTACHMENT_PREVIEW_CHAR_LIMIT = 240
 
 
 @asynccontextmanager
@@ -402,6 +414,88 @@ def _rebuild_all_fts(conn: sqlite3.Connection) -> None:
         )
         _sync_thread_index_sqlite(conn, tid, title, derived["search_body"])
 
+
+def _ensure_attachment_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attachments (
+            id           TEXT PRIMARY KEY,
+            filename     TEXT NOT NULL,
+            content_type TEXT NOT NULL DEFAULT '',
+            size_bytes   INTEGER NOT NULL DEFAULT 0,
+            parsed_text  TEXT NOT NULL DEFAULT '',
+            created_at   INTEGER NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_attachments_created_at
+        ON attachments(created_at DESC)
+        """
+    )
+
+
+def _serialize_attachment_record(
+    item: sqlite3.Row | aiosqlite.Row | dict[str, Any],
+    *,
+    include_text: bool = False,
+) -> dict[str, Any]:
+    data = dict(item)
+    payload = {
+        "id": data["id"],
+        "filename": data["filename"],
+        "content_type": data.get("content_type") or "",
+        "size_bytes": int(data.get("size_bytes") or 0),
+        "created_at": int(data.get("created_at") or 0),
+    }
+    if include_text:
+        payload["parsed_text"] = str(data.get("parsed_text") or "")
+    return payload
+
+
+def _normalize_attachment_ids(raw_ids: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_id in raw_ids:
+        attachment_id = str(raw_id or "").strip()
+        if not attachment_id or attachment_id in seen:
+            continue
+        seen.add(attachment_id)
+        normalized.append(attachment_id)
+    if len(normalized) > MAX_ATTACHMENT_COUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"attachments exceed limit {MAX_ATTACHMENT_COUNT}",
+        )
+    return normalized
+
+
+def _attachment_prompt_block(attachments: list[dict[str, Any]]) -> str:
+    if not attachments:
+        return ""
+
+    remaining = ATTACHMENT_PROMPT_CHAR_LIMIT
+    sections = ["## Uploaded attachments"]
+    for index, attachment in enumerate(attachments, 1):
+        parsed_text = str(attachment.get("parsed_text") or "").strip()
+        if not parsed_text:
+            continue
+        if remaining <= 0:
+            break
+        excerpt = parsed_text[:remaining]
+        sections.append(f"### Attachment {index}: {attachment.get('filename') or f'file-{index}'}")
+        sections.append(excerpt)
+        remaining -= len(excerpt)
+    return "\n\n".join(sections) if len(sections) > 1 else ""
+
+
+def _content_with_attachment_context(content: str, attachments: list[dict[str, Any]]) -> str:
+    attachment_block = _attachment_prompt_block(attachments)
+    if not attachment_block:
+        return content
+    return f"{content}\n\n{attachment_block}"
+
 # ----------------------------------------------------------------------
 # DB helpers
 # ----------------------------------------------------------------------
@@ -558,6 +652,73 @@ async def _db_delete_thread(tid: str) -> bool:
     return deleted
 
 
+async def _db_create_attachment(
+    *,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    parsed_text: str,
+) -> dict[str, Any]:
+    attachment_id = uuid.uuid4().hex
+    created_at = int(time.time() * 1000)
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        await db.execute(
+            """
+            INSERT INTO attachments (
+                id, filename, content_type, size_bytes, parsed_text, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attachment_id,
+                filename,
+                content_type,
+                int(size_bytes),
+                parsed_text,
+                created_at,
+            ),
+        )
+        await db.commit()
+    return {
+        "id": attachment_id,
+        "filename": filename,
+        "content_type": content_type,
+        "size_bytes": int(size_bytes),
+        "parsed_text": parsed_text,
+        "created_at": created_at,
+    }
+
+
+async def _db_get_attachments(attachment_ids: list[str]) -> list[dict[str, Any]]:
+    if not attachment_ids:
+        return []
+    placeholders = ",".join("?" for _ in attachment_ids)
+    async with aiosqlite.connect(str(DB_PATH)) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            f"""
+            SELECT id, filename, content_type, size_bytes, parsed_text, created_at
+            FROM attachments
+            WHERE id IN ({placeholders})
+            """,
+            attachment_ids,
+        ) as cur:
+            rows = await cur.fetchall()
+    by_id = {row["id"]: _serialize_attachment_record(row, include_text=True) for row in rows}
+    return [by_id[attachment_id] for attachment_id in attachment_ids if attachment_id in by_id]
+
+
+async def _resolve_attachments(attachment_ids: list[str]) -> list[dict[str, Any]]:
+    normalized_ids = _normalize_attachment_ids(attachment_ids)
+    if not normalized_ids:
+        return []
+    attachments = await _db_get_attachments(normalized_ids)
+    if len(attachments) != len(normalized_ids):
+        resolved_ids = {attachment["id"] for attachment in attachments}
+        missing = [attachment_id for attachment_id in normalized_ids if attachment_id not in resolved_ids]
+        raise HTTPException(status_code=400, detail=f"unknown attachments: {missing}")
+    return attachments
+
+
 async def _db_update_title(tid: str, title: str) -> None:
     clean_title = (title or "").strip() or DEFAULT_THREAD_TITLE
     async with aiosqlite.connect(str(DB_PATH)) as db:
@@ -708,6 +869,7 @@ def _init_db() -> None:
         """
     )
     columns_changed = _ensure_thread_columns(conn)
+    _ensure_attachment_schema(conn)
     fts_sql_row = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='threads_fts'"
     ).fetchone()
@@ -883,11 +1045,30 @@ class ThreadPatchRequest(BaseModel):
     title: str
 
 
+class AttachmentInfo(BaseModel):
+    id: str
+    filename: str
+    content_type: str = ""
+    size_bytes: int = 0
+    created_at: int
+
+
+class AttachmentUploadRequest(BaseModel):
+    filename: str
+    content_type: str = ""
+    data_base64: str = Field(..., description="Base64 encoded file contents")
+
+
+class AttachmentUploadResponse(AttachmentInfo):
+    text_preview: str = ""
+
+
 class GraphRunRequest(BaseModel):
     content: str = Field(..., description="Research question")
     engine: str = ""
     max_steps: int = Field(default=8, ge=3, le=15)
     use_planner: bool = False
+    attachments: list[str] = Field(default_factory=list)
 
 
 class RunSummaryInfo(BaseModel):
@@ -912,6 +1093,22 @@ class SearchProviderInfo(BaseModel):
 class SearchProviderCatalogResponse(BaseModel):
     active_order: list[str] = Field(default_factory=list)
     providers: list[SearchProviderInfo] = Field(default_factory=list)
+
+
+class EnginePresetInfo(BaseModel):
+    name: str
+    roles: list[str] = Field(default_factory=list)
+
+
+class EngineProviderInfo(BaseModel):
+    name: str
+    model: str = ""
+    configured: bool = False
+
+
+class EngineCatalogResponse(BaseModel):
+    presets: list[EnginePresetInfo] = Field(default_factory=list)
+    providers: list[EngineProviderInfo] = Field(default_factory=list)
 
 
 class SearchProviderAttemptInfo(BaseModel):
@@ -947,6 +1144,50 @@ class SearchDiagnosticsResponse(BaseModel):
 @app.post("/api/threads", summary="Create thread")
 async def create_thread(body: ThreadCreateRequest) -> dict:
     return await _db_create_thread(body.title)
+
+
+@app.post("/api/uploads", response_model=AttachmentUploadResponse, summary="Upload and parse one attachment")
+async def upload_attachment(body: AttachmentUploadRequest) -> AttachmentUploadResponse:
+    filename = Path(body.filename or "").name.strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in SUPPORTED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unsupported attachment type: {ext or 'unknown'}",
+        )
+
+    try:
+        file_bytes = base64.b64decode(body.data_base64, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid attachment payload") from exc
+
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="attachment cannot be empty")
+    if len(file_bytes) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"attachment exceeds {MAX_UPLOAD_SIZE_BYTES} bytes",
+        )
+
+    parsed_text = str(
+        await asyncio.to_thread(parse_uploaded_document, file_bytes, filename)
+    ).strip()
+    if not parsed_text:
+        raise HTTPException(status_code=422, detail="attachment could not be parsed")
+
+    attachment = await _db_create_attachment(
+        filename=filename,
+        content_type=(body.content_type or "").strip(),
+        size_bytes=len(file_bytes),
+        parsed_text=parsed_text,
+    )
+    return AttachmentUploadResponse(
+        **_serialize_attachment_record(attachment),
+        text_preview=parsed_text[:ATTACHMENT_PREVIEW_CHAR_LIMIT],
+    )
 
 
 @app.get("/api/threads", summary="List recent threads")
@@ -1197,6 +1438,9 @@ async def create_graph_run(thread_id: str, body: GraphRunRequest) -> RunState:
     question = body.content.strip()
     if not question:
         raise HTTPException(status_code=400, detail="content cannot be empty")
+    attachments = await _resolve_attachments(body.attachments)
+    attachment_refs = [_serialize_attachment_record(item) for item in attachments]
+    attachment_prompt = _attachment_prompt_block(attachments)
 
     route_kind = "planned_research" if body.use_planner else "direct_research"
     state = create_run_state(
@@ -1208,18 +1452,22 @@ async def create_graph_run(thread_id: str, body: GraphRunRequest) -> RunState:
     state.context["max_steps"] = body.max_steps
     state.context["use_planner"] = body.use_planner
     state.context["thread_title"] = str(thread.get("title") or DEFAULT_THREAD_TITLE)
+    if attachment_refs:
+        state.context["uploaded_attachments"] = attachment_refs
+    if attachment_prompt:
+        state.context["uploaded_attachment_prompt"] = attachment_prompt
     state.updated_at = int(time.time() * 1000)
 
-    await _db_append_message(
-        thread_id,
-        {
-            "role": "user",
-            "content": question,
-            "mode": _run_mode_from_flag(body.use_planner),
-            "run_id": state.run_id,
-            "ts": int(time.time() * 1000),
-        },
-    )
+    user_message = {
+        "role": "user",
+        "content": question,
+        "mode": _run_mode_from_flag(body.use_planner),
+        "run_id": state.run_id,
+        "ts": int(time.time() * 1000),
+    }
+    if attachment_refs:
+        user_message["attachments"] = attachment_refs
+    await _db_append_message(thread_id, user_message)
     await asyncio.to_thread(run_store.save_run_state, DB_PATH, state)
     task = asyncio.create_task(
         _run_graph_in_background(
@@ -1371,6 +1619,26 @@ def list_search_providers() -> SearchProviderCatalogResponse:
     )
 
 
+@app.get("/api/ai/engines", response_model=EngineCatalogResponse, summary="List selectable AI engine presets and providers")
+def list_ai_engines() -> EngineCatalogResponse:
+    presets = [
+        EnginePresetInfo(
+            name=name,
+            roles=[role for role, order in preset.items() if role in {"orchestrator", "worker", "analyst"} and order],
+        )
+        for name, preset in ENGINE_PRESETS.items()
+    ]
+    providers = [
+        EngineProviderInfo(
+            name=name,
+            model=str(cfg.get("model", "")),
+            configured=bool(load_secret(str(cfg.get("env", "")).strip())),
+        )
+        for name, cfg in PROVIDERS.items()
+    ]
+    return EngineCatalogResponse(presets=presets, providers=providers)
+
+
 @app.get(
     "/api/search/diagnostics",
     response_model=SearchDiagnosticsResponse,
@@ -1404,6 +1672,7 @@ def search_diagnostics(
 class ChatRequest(BaseModel):
     content: str = Field(..., description="User message content")
     engine: str = ""
+    attachments: list[str] = Field(default_factory=list)
 
 
 @app.post("/api/threads/{thread_id}/chat", summary="Stream chat response")
@@ -1415,8 +1684,13 @@ async def chat_stream(thread_id: str, body: ChatRequest, request: Request):
     prompt_text = body.content.strip()
     if not prompt_text:
         raise HTTPException(status_code=400, detail="content cannot be empty")
+    attachments = await _resolve_attachments(body.attachments)
+    attachment_refs = [_serialize_attachment_record(item) for item in attachments]
+    prompt_text_with_attachments = _content_with_attachment_context(prompt_text, attachments)
 
     user_msg = {"role": "user", "content": prompt_text, "ts": int(time.time() * 1000)}
+    if attachment_refs:
+        user_msg["attachments"] = attachment_refs
     await _db_append_message(thread_id, user_msg)
 
     from agent import ai_generate_role
@@ -1424,7 +1698,7 @@ async def chat_stream(thread_id: str, body: ChatRequest, request: Request):
     async def generator() -> AsyncIterator[str]:
         yield _sse("message_start", {"role": "user", "content": prompt_text})
         try:
-            prompt = _build_chat_prompt(thread.get("messages", []), prompt_text)
+            prompt = _build_chat_prompt(thread.get("messages", []), prompt_text_with_attachments)
             answer = await asyncio.to_thread(
                 ai_generate_role,
                 prompt,
@@ -1457,6 +1731,7 @@ class ResearchRequest(BaseModel):
     max_steps: int = Field(default=8, ge=3, le=15)
     skill_profile: str = DEFAULT_SKILL_PROFILE
     use_planner: bool = False
+    attachments: list[str] = Field(default_factory=list)
 
 
 @app.post("/api/threads/{thread_id}/research", summary="Stream research run")
@@ -1473,6 +1748,9 @@ async def _thread_run_stream(thread_id: str, body: ResearchRequest, request: Req
     if not question:
         raise HTTPException(status_code=400, detail="content cannot be empty")
     profile_name = _validate_profile_name(body.skill_profile.strip() or DEFAULT_SKILL_PROFILE)
+    attachments = await _resolve_attachments(body.attachments)
+    attachment_refs = [_serialize_attachment_record(item) for item in attachments]
+    effective_question = _content_with_attachment_context(question, attachments)
 
     user_msg = {
         "role": "user",
@@ -1480,6 +1758,8 @@ async def _thread_run_stream(thread_id: str, body: ResearchRequest, request: Req
         "mode": "planner" if body.use_planner else "research",
         "ts": int(time.time() * 1000),
     }
+    if attachment_refs:
+        user_msg["attachments"] = attachment_refs
     await _db_append_message(thread_id, user_msg)
 
     async def generator() -> AsyncIterator[str]:
@@ -1488,7 +1768,7 @@ async def _thread_run_stream(thread_id: str, body: ResearchRequest, request: Req
         queue: asyncio.Queue = asyncio.Queue()
         task = asyncio.create_task(
             _run_research_stream(
-                question=question,
+                question=effective_question,
                 engine=body.engine,
                 max_steps=body.max_steps,
                 skill_profile=profile_name,
@@ -1593,6 +1873,7 @@ class RunRequest(BaseModel):
     engine: str = Field(default="")
     max_steps: int = Field(default=8, ge=3, le=15)
     skill_profile: str = Field(default="api_safe")
+    attachments: list[str] = Field(default_factory=list)
 
 
 class SourceInfo(BaseModel):
@@ -1856,12 +2137,18 @@ def route_preview_endpoint(req: RoutePreviewRequest) -> RoutePreviewResponse:
 
 
 @app.post("/run", response_model=RunResponse)
-def run_sync(req: RunRequest) -> RunResponse:
+async def run_sync(req: RunRequest) -> RunResponse:
     q = req.question.strip()
     if not q:
         raise HTTPException(status_code=400, detail="question cannot be empty")
     profile_name = _validate_profile_name(req.skill_profile.strip() or DEFAULT_SKILL_PROFILE)
-    result = run_agent(question=q, engine=req.engine, max_steps=req.max_steps, skill_profile=profile_name)
+    attachments = await _resolve_attachments(req.attachments)
+    result = run_agent(
+        question=_content_with_attachment_context(q, attachments),
+        engine=req.engine,
+        max_steps=req.max_steps,
+        skill_profile=profile_name,
+    )
     observations_raw = result.get("observations", [])
     references, references_md = _build_references(observations_raw)
     return RunResponse(
